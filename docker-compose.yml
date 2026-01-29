@@ -1,0 +1,69 @@
+
+
+services:
+  pg:
+    image: postgres:13
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:${POSTGRES_PORT}"
+    volumes:
+      - pg_data_isolated:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d
+
+  milvus:
+    image: milvusdb/milvus:v2.4.0
+    restart: always
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:${ETCD_PORT}
+      MINIO_ADDRESS: minio:${MINIO_PORT}
+    ports:
+      - "${MILVUS_PORT}:${MILVUS_PORT}"
+    depends_on:
+      - etcd
+      - minio
+    volumes:
+      - milvus_data_isolated:/var/lib/milvus
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.7
+    restart: always
+    environment:
+      ETCD_AUTO_COMPACTION_RETENTION: "1"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    volumes:
+      - etcd_data_isolated:/etcd
+    command:
+      - etcd
+      - --advertise-client-urls=http://0.0.0.0:${ETCD_PORT}
+      - --listen-client-urls=http://0.0.0.0:${ETCD_PORT}
+      - --data-dir=/etcd
+
+  minio:
+    image: minio/minio:RELEASE.2024-01-11T07-46-16Z
+    restart: always
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    command: server /data
+    ports:
+      - "${MINIO_PORT}:${MINIO_PORT}"
+    volumes:
+      - minio_data_isolated:/data
+
+volumes:
+  pg_data_isolated:
+  milvus_data_isolated:
+  etcd_data_isolated:
+  minio_data_isolated:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${DOCKER_SUBNET}

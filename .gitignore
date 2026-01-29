@@ -1,0 +1,8 @@
+*mp3
+*wav
+some_audios/
+F5TTS/
+data/
+*pyc
+*pkl
+*faiss

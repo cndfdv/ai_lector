@@ -5,31 +5,16 @@ from typing import List
 from pydantic import BaseModel, Field
 
 
+class Question(BaseModel):
+    question: str = Field(description="Один вопрос для самопроверки", min_length=1)
+
+
 class QuestionsResult(BaseModel):
-    """List of self-check questions for a lecture."""
-
-    questions: List[str] = Field(
-        description="10-12 вопросов для самопроверки по материалу лекции",
-        min_length=10,
-        max_length=15,
+    questions: List[Question] = Field(
+        description="12 вопросов для самопроверки по конспекту лекции",
+        min_items=10,
+        max_items=15,
     )
-
-
-class MindMapNode(BaseModel):
-    """A node in the mind map hierarchy."""
-
-    id: str = Field(description="Уникальный идентификатор узла")
-    label: str = Field(description="Название темы или подтемы")
-    children: List["MindMapNode"] = Field(
-        default_factory=list, description="Дочерние узлы (подтемы)"
-    )
-
-
-class MindMap(BaseModel):
-    """Hierarchical mind map of lecture content."""
-
-    title: str = Field(description="Название лекции")
-    nodes: List[MindMapNode] = Field(description="Основные темы лекции")
 
 
 class PodcastPart(BaseModel):
@@ -45,14 +30,3 @@ class PodcastScript(BaseModel):
     parts: List[PodcastPart] = Field(
         description="Список частей диалога подкаста", min_length=1
     )
-
-
-class EmotionalAnalysis(BaseModel):
-    """Emotional analysis result - two adjectives describing the fragment."""
-
-    adjective1: str = Field(description="Первое прилагательное, описывающее фрагмент")
-    adjective2: str = Field(description="Второе прилагательное, описывающее фрагмент")
-
-
-# Allow forward references for recursive MindMapNode
-MindMapNode.model_rebuild()

@@ -9,9 +9,11 @@ from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
 import numpy as np
-from dotenv import load_dotenv
 import torch
 import torchaudio
+from dotenv import load_dotenv
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from pyannote.audio import Pipeline
 from pydub import AudioSegment
@@ -19,18 +21,13 @@ from ruaccent import RUAccent
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 
 from F5TTS.f5_tts.api import F5TTS
-from src.llm_models import (
-    PodcastPart,
-    PodcastScript,
-    QuestionsResult,
-)
+from src.llm_models import PodcastScript, QuestionsResult
 from src.prompts import (
     ABSTRACT_PROMPT,
     CLEAN_PODCAST_PROMPT,
     EMOT_AN_PROMPT,
     MINDMAP_PROMPT,
     PODCAST_PROMPT,
-    QUESTIONS_PROMPT,
 )
 
 STOPWORDS_PATH = "src/stopwords.txt"
@@ -553,20 +550,24 @@ class LectureAnalyzer:
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 
-        self.diarization_pipeline = self._load_diarization_pipeline(os.getenv("HUGGINGFACEHUB_API_TOKEN"))
+        self.diarization_pipeline = self._load_diarization_pipeline(
+            os.getenv("HUGGINGFACEHUB_API_TOKEN")
+        )
         self.speech_pipe, self.processor = self._load_whisper()
         self.f5tts, self.accentizer = self._load_tts()
 
+        # LLM with reasoning for all tasks
         self.llm = ChatOpenAI(
             model=os.getenv("LLM_NAME"),
             base_url=os.getenv("LLM_URL"),
             api_key=os.getenv("LLM_API_KEY"),
+            reasoning={"effort": "high", "summary": "auto"},
             temperature=0,
         )
 
-        # Structured outputs for validated responses
-        self.questions_llm = self.llm.with_structured_output(QuestionsResult)
-        self.podcast_llm = self.llm.with_structured_output(PodcastScript)
+        # JSON parsers for structured outputs (works with reasoning mode)
+        self.questions_parser = JsonOutputParser(pydantic_object=QuestionsResult)
+        self.podcast_parser = JsonOutputParser(pydantic_object=PodcastScript)
 
     def _load_diarization_pipeline(self, api_key: str) -> Pipeline:
         """Load pyannote speaker diarization pipeline."""
@@ -614,24 +615,111 @@ class LectureAnalyzer:
     # LLM Methods (langchain + structured outputs)
     # =========================================================================
 
-    def _parse_json(self, text: str) -> dict:
-        """Extract JSON from LLM response.
+    def _extract_llm_response(self, response) -> str:
+        """Extract text from LLM response (handles reasoning mode).
 
         Args:
-            text: Raw LLM response that may contain JSON.
+            response: AIMessage from llm.invoke().
 
         Returns:
-            Parsed JSON as dict.
+            Extracted text content.
         """
-        # Remove markdown code blocks
-        text = re.sub(r"```json\s*", "", text)
-        text = re.sub(r"```\s*", "", text)
+        content = response.content
+        if isinstance(content, list):
+            for item in reversed(content):
+                if isinstance(item, dict) and "text" in item:
+                    return item["text"]
+            return "".join(
+                item.get("text", "") if isinstance(item, dict) else str(item)
+                for item in content
+            )
+        return content
 
-        # Find JSON object
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            return json.loads(match.group())
-        raise ValueError(f"No valid JSON found in: {text[:100]}...")
+    def _parse_json(self, text: str) -> dict:
+        """
+        Попытка извлечь и очистить JSON-строку, сгенерированную моделью.
+        Включает несколько шагов исправления до использования LLM для реконструкции.
+        """
+
+        # --- Шаг 0: Подготовка текста
+
+        # 0.1. Извлекаем JSON (только между первой { и последней })
+        text = text.strip()
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1:
+            # Невозможно начать, если нет скобок.
+            raise ValueError("В тексте не найден JSON-объект (нет {}).")
+        text = text[start : end + 1]
+
+        # 0.2. Предварительная очистка и нормализация
+        # Удаляем невидимые символы (включая неразрывные пробелы)
+        text = re.sub(r"[\u0000-\u001F\u007F-\u009F\u00AD\u202f\xa0]", " ", text)
+
+        # Нормализуем типографские кавычки
+        text = (
+            text.replace("“", '"').replace("”", '"').replace("′", '"').replace("″", '"')
+        )
+
+        # 0.3. Исправляем "голые" обратные слэши
+        text = re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", text)
+
+        # --- Шаг 1: Попытка 1 (Базовый парсинг)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass  # Попробуем исправить формат
+
+        # --- Шаг 2: Агрессивное исправление формата (Ключи и одинарные кавычки)
+
+        # 2.1. Исправляем "голые" ключи и значения: key: value → "key": "value"
+        def fix_key_value_and_quotes(match):
+            key = match.group(1).strip()
+            val = match.group(2).strip()
+
+            # Убираем завершающую запятую, если есть
+            val = re.sub(r",$", "", val)
+
+            # Экранируем ключ и добавляем кавычки
+            key_fixed = key.replace('"', '\\"')
+            if not (key_fixed.startswith('"') and key_fixed.endswith('"')):
+                key_fixed = f'"{key_fixed}"'
+
+            # Если значение не в кавычках — добавим, заменяя одинарные на двойные
+            if not (val.startswith('"') and val.endswith('"')):
+                # Заменяем одинарные кавычки внутри строки на двойные для совместимости с JSON
+                val = val.replace("'", '"')
+                # Экранируем внутренние двойные кавычки
+                val = val.replace('"', '\\"')
+                val = f'"{val}"'
+            # Если значение уже в кавычках (одинарных или двойных), гарантируем, что двойных
+            elif val.startswith("'") and val.endswith("'"):
+                val = (
+                    val[1:-1].replace('"', '\\"').replace("'", '"')
+                )  # Замена одинарных на двойные
+                val = f'"{val}"'
+
+            return f"{key_fixed}: {val}"
+
+        # Находим и исправляем пары key: value, где ключ или значение не в кавычках.
+        text_fixed_quotes = re.sub(
+            r'(\w+|"[^"]+"|' + r"'[^']+'" + r")\s*:\s*([^,{}\n]+)",
+            fix_key_value_and_quotes,
+            text,
+            flags=re.DOTALL,
+        )
+
+        # 2.2. Удаляем висячие запятые (Trailing Commas)
+        # Находим запятую, за которой следуют пробелы/переводы строки и сразу } или ]
+        text_fixed_quotes = re.sub(r",\s*([}\]])", r"\1", text_fixed_quotes)
+
+        # --- Шаг 3: Попытка 2 (Парсинг после исправления кавычек и запятых)
+        try:
+            return json.loads(text_fixed_quotes)
+        except json.JSONDecodeError as e2:
+            raise ValueError(
+                f"Не удалось распарсить JSON после исправлений. Ошибка: {e2}\nТекст: {text_fixed_quotes[:500]}..."
+            )
 
     def _generate_abstract(self, lecture_text: str) -> str:
         """Generate lecture abstract (markdown).
@@ -642,11 +730,13 @@ class LectureAnalyzer:
         Returns:
             Markdown abstract text.
         """
-        response = self.llm.invoke(f"{ABSTRACT_PROMPT}\n\nТекст лекции:\n{lecture_text}")
-        return latex_to_md(response.content)
+        response = self.llm.invoke(
+            f"{ABSTRACT_PROMPT}\n\nТекст лекции:\n{lecture_text}"
+        )
+        return latex_to_md(self._extract_llm_response(response))
 
     def _generate_questions(self, lecture_text: str) -> List[str]:
-        """Generate self-check questions.
+        """Generate self-check questions using structured output with reasoning.
 
         Args:
             lecture_text: Full lecture transcription.
@@ -654,22 +744,63 @@ class LectureAnalyzer:
         Returns:
             List of 10-12 questions.
         """
-        result = self.questions_llm.invoke(
-            f"{QUESTIONS_PROMPT}\n\nТекст лекции:\n{lecture_text}"
-        )
-        return result.questions
+        questions_prompt = PromptTemplate(
+            template="""
+Ты — ИИ-методист. Получишь текст лекции и должен составить список вопросов.
 
-    def _generate_mindmap(self, lecture_text: str) -> dict:
+Сформируй строго структурированный JSON, соответствующий схеме ниже.
+
+{format_instructions}
+
+Инструкция:
+1. Сформулируй ровно 12 вопросов.
+2. Следуй порядку изложения лекции.
+3. Используй только русский язык.
+4. Никаких комментариев, пояснений, разметки.
+5. Для оформления формул используй markdown форматирование
+
+Верни строго корректный JSON.
+Текст лекции:
+{lecture_text}
+""",
+            input_variables=["lecture_text"],
+            partial_variables={
+                "format_instructions": self.questions_parser.get_format_instructions()
+            },
+        )
+        try:
+            result = self.questions_parser.invoke(
+                self.llm.invoke(questions_prompt.format(lecture_text=lecture_text))
+            )
+            # Extract question strings from Question objects
+            questions = result.get("questions", [])
+            return [q.get("question", q) if isinstance(q, dict) else str(q) for q in questions]
+        except Exception:
+            return []
+
+    def _generate_mindmap(self, lecture_text: str, max_retries: int = 3) -> dict:
         """Generate mind map structure.
 
         Args:
             lecture_text: Full lecture transcription.
+            max_retries: Maximum number of retry attempts.
 
         Returns:
             Dict with mind map structure.
         """
-        response = self.llm.invoke(f"{MINDMAP_PROMPT}\n\nТекст лекции:\n{lecture_text}")
-        return self._parse_json(response.content)
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                response = self.llm.invoke(
+                    f"{MINDMAP_PROMPT}\n\nТекст лекции:\n{lecture_text}"
+                )
+                return self._parse_json(self._extract_llm_response(response))
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    continue  # Retry
+        # All retries failed
+        raise ValueError(f"Не удалось сгенерировать mindmap после {max_retries} попыток: {last_error}")
 
     def _analyze_emotion(self, text: str) -> str:
         """Analyze emotional tone of a text fragment.
@@ -681,10 +812,10 @@ class LectureAnalyzer:
             Adjectives describing the fragment.
         """
         response = self.llm.invoke(f"{EMOT_AN_PROMPT}\n\nФрагмент:\n{text}")
-        return response.content.strip()
+        return self._extract_llm_response(response).strip()
 
     def _generate_podcast_script(self, lecture_text: str, questions: List[str]) -> dict:
-        """Generate podcast script.
+        """Generate podcast script using structured output with reasoning.
 
         Args:
             lecture_text: Full lecture transcription.
@@ -694,29 +825,54 @@ class LectureAnalyzer:
             Dict with podcast parts.
         """
         questions_str = "\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions))
-        result = self.podcast_llm.invoke(
-            f"{PODCAST_PROMPT}\n\nВопросы:\n{questions_str}\n\nЛекция:\n{lecture_text}"
-        )
-        return result.model_dump()
+        prompt = PromptTemplate(
+            template="""{base_prompt}
 
-    def _clean_podcast_part(self, part: PodcastPart) -> dict:
+            {format_instructions}
+
+            Вопросы:
+            {questions_str}
+
+            Лекция:
+            {lecture_text}""",
+            input_variables=["lecture_text", "questions_str"],
+            partial_variables={
+                "base_prompt": PODCAST_PROMPT,
+                "format_instructions": self.podcast_parser.get_format_instructions(),
+            },
+        )
+        response = self.llm.invoke(
+            prompt.invoke(
+                {"lecture_text": lecture_text, "questions_str": questions_str}
+            )
+        )
+        text = self._extract_llm_response(response)
+        try:
+            return self.podcast_parser.invoke(text)
+        except Exception:
+            return {"parts": []}
+
+    def _clean_podcast_part(self, part: dict) -> dict:
         """Clean a single podcast part for TTS.
 
         Args:
-            part: PodcastPart with presenter and lector text.
+            part: Dict with presenter and lector text.
 
         Returns:
             Cleaned podcast part as dict.
         """
+        presenter_text = part.get("presenter", "")
+        lector_text = part.get("lector", "")
+
         presenter_response = self.llm.invoke(
-            f"{CLEAN_PODCAST_PROMPT}\n\nТекст:\n{part.presenter}"
+            f"{CLEAN_PODCAST_PROMPT}\n\nТекст:\n{presenter_text}"
         )
-        cleaned_presenter = presenter_response.content
+        cleaned_presenter = self._extract_llm_response(presenter_response)
 
         lector_response = self.llm.invoke(
-            f"{CLEAN_PODCAST_PROMPT}\n\nТекст:\n{part.lector}"
+            f"{CLEAN_PODCAST_PROMPT}\n\nТекст:\n{lector_text}"
         )
-        cleaned_lector = lector_response.content
+        cleaned_lector = self._extract_llm_response(lector_response)
 
         return {"presenter": cleaned_presenter, "lector": cleaned_lector}
 
@@ -730,9 +886,8 @@ class LectureAnalyzer:
             Cleaned podcast script formatted for generate_podcast function.
         """
         cleaned_parts = {}
-        for i, part in enumerate(podcast_script["parts"]):
-            part_obj = PodcastPart(**part) if isinstance(part, dict) else part
-            cleaned_parts[f"part_{i + 1}"] = self._clean_podcast_part(part_obj)
+        for i, part in enumerate(podcast_script.get("parts", [])):
+            cleaned_parts[f"part_{i + 1}"] = self._clean_podcast_part(part)
         return cleaned_parts
 
     def process(
@@ -820,9 +975,7 @@ class LectureAnalyzer:
         result = self.process(recording_path, record_id, group, lection_date)
         return json.dumps(result, default=str)
 
-    def _llm_analyze(
-        self, lecture_text: str, transcripted_chunks: List[List]
-    ) -> dict:
+    def _llm_analyze(self, lecture_text: str, transcripted_chunks: List[List]) -> dict:
         """Analyze lecture using LLM with structured outputs.
 
         Generates abstract, questions, mind map, podcast text, and emotional analysis.

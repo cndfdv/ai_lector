@@ -1,12 +1,35 @@
 """Agentic RAG implementation using LangGraph."""
 
-from copy import deepcopy
-from typing import Annotated, List, Optional, TypedDict
+from typing import List, Optional, TypedDict
 
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import BaseOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
+
+
+class ReasoningOutputParser(BaseOutputParser[str]):
+    """Output parser that handles reasoning mode responses."""
+
+    def parse(self, text) -> str:
+        """Extract text from LLM response (handles reasoning mode)."""
+        # If it's already a string, return it
+        if isinstance(text, str):
+            return text
+
+        # If it's an AIMessage with content
+        content = getattr(text, "content", text)
+
+        # If reasoning is enabled, content is a list of dicts
+        if isinstance(content, list):
+            for item in reversed(content):
+                if isinstance(item, dict) and "text" in item:
+                    return item["text"]
+            return "".join(
+                item.get("text", "") if isinstance(item, dict) else str(item)
+                for item in content
+            )
+        return str(content)
 
 from .config import RAGConfig
 from .prompts import (
@@ -109,7 +132,7 @@ class AgenticRAG:
     def _rewrite_query(self, state: AgentState) -> dict:
         """Rewrite the user question for better retrieval."""
         prompt = ChatPromptTemplate.from_template(QUERY_REWRITER_PROMPT)
-        chain = prompt | self.llm | StrOutputParser()
+        chain = prompt | self.llm | ReasoningOutputParser()
         rewritten = chain.invoke({"question": state["question"]})
         return {
             "rewritten_question": rewritten.strip(),
@@ -128,7 +151,7 @@ class AgenticRAG:
     def _grade_documents(self, state: AgentState) -> dict:
         """Grade document relevance."""
         prompt = ChatPromptTemplate.from_template(RELEVANCE_GRADER_PROMPT)
-        chain = prompt | self.llm | StrOutputParser()
+        chain = prompt | self.llm | ReasoningOutputParser()
 
         relevant_docs = []
         relevant_metadata = []
@@ -152,7 +175,7 @@ class AgenticRAG:
         """Generate answer from documents."""
         context = "\n\n---\n\n".join(state["documents"])
         prompt = ChatPromptTemplate.from_template(GENERATION_PROMPT)
-        chain = prompt | self.llm | StrOutputParser()
+        chain = prompt | self.llm | ReasoningOutputParser()
 
         generation = chain.invoke({
             "context": context,
@@ -163,7 +186,7 @@ class AgenticRAG:
     def _check_hallucination(self, state: AgentState) -> dict:
         """Check if generation is grounded in documents."""
         prompt = ChatPromptTemplate.from_template(HALLUCINATION_GRADER_PROMPT)
-        chain = prompt | self.llm | StrOutputParser()
+        chain = prompt | self.llm | ReasoningOutputParser()
 
         grade = chain.invoke({
             "documents": "\n\n".join(state["documents"]),
@@ -175,7 +198,7 @@ class AgenticRAG:
     def _grade_answer(self, state: AgentState) -> dict:
         """Grade if answer is useful."""
         prompt = ChatPromptTemplate.from_template(ANSWER_GRADER_PROMPT)
-        chain = prompt | self.llm | StrOutputParser()
+        chain = prompt | self.llm | ReasoningOutputParser()
 
         grade = chain.invoke({
             "question": state["question"],

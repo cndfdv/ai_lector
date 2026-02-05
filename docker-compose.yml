@@ -56,6 +56,29 @@ services:
     volumes:
       - minio_data_isolated:/data
 
+  app:
+    build: .
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./uploads:/app/uploads
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_HOST=pg
+      - MILVUS_HOST=milvus
+    depends_on:
+      - pg
+      - milvus
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
 volumes:
   pg_data_isolated:
   milvus_data_isolated:

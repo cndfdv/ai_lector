@@ -149,19 +149,16 @@ class LectureRAG:
 
         return lecture_id
 
-    def query(self, question: str, max_iterations: Optional[int] = None) -> dict:
-        """Query the RAG system with agentic reasoning.
+    def query(self, question: str) -> dict:
+        """Query the RAG system: rewrite → retrieve → generate.
 
         Args:
             question: User question.
-            max_iterations: Maximum self-correction iterations.
-                           Uses config default if not specified.
 
         Returns:
-            Dict with answer, sources, iterations, and grades.
+            Dict with answer, sources, and rewritten_question.
         """
-        iterations = max_iterations or self.config.max_iterations
-        return self._agent.query(question, iterations)
+        return self._agent.query(question)
 
     def simple_search(self, query: str, k: Optional[int] = None) -> List[Document]:
         """Simple similarity search without agentic reasoning.

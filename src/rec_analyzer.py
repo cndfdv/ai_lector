@@ -561,7 +561,7 @@ class LectureAnalyzer:
             model=os.getenv("LLM_NAME"),
             base_url=os.getenv("LLM_URL"),
             api_key=os.getenv("LLM_API_KEY"),
-            reasoning={"effort": "high", "summary": "auto"},
+            reasoning={"effort": "high", "summary": None},
             temperature=0,
         )
 

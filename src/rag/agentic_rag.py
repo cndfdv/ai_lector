@@ -52,6 +52,7 @@ class AgenticRAG:
             model=config.llm_name,
             base_url=config.llm_url,
             api_key=config.llm_api_key,
+            reasoning={"effort": "high", "summary": None},
             temperature=0,
         )
         self.graph = self._build_graph()

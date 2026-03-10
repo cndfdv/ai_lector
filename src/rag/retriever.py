@@ -48,7 +48,7 @@ class RAGRetriever:
         return self.vector_store.similarity_search(
             query,
             k=k,
-            filter={"student_group": student_group},
+            filter=f'array_contains(student_groups, "{student_group}")',
         )
 
     def search_by_date_range(
@@ -89,7 +89,7 @@ class RAGRetriever:
         results = []
         for doc in docs:
             lecture_id = doc.metadata.get("lecture_id", "unknown")
-            group = doc.metadata.get("student_group", "unknown")
+            group = doc.metadata.get("student_groups", "unknown")
             date = doc.metadata.get("lecture_date", "unknown")
             header = f"[Лекция: {lecture_id}, Группа: {group}, Дата: {date}]"
             results.append(f"{header}\n{doc.page_content}")

@@ -64,19 +64,17 @@ class LectureRAG:
     def add_lecture(
         self,
         lecture_text: str,
-        student_group: str,
+        student_groups: List[str],
         lecture_date: date,
         record_id: Optional[str] = None,
-        abstract: Optional[str] = None,
     ) -> str:
         """Add a lecture to the RAG system.
 
         Args:
             lecture_text: Full lecture text.
-            student_group: Student group identifier.
+            student_groups: List of student group identifiers.
             lecture_date: Date of the lecture.
             record_id: Optional unique record identifier.
-            abstract: Optional lecture abstract.
 
         Returns:
             Lecture ID (UUID).
@@ -107,7 +105,7 @@ class LectureRAG:
             texts.append(chunk_text)
             metadatas.append({
                 "lecture_id": lecture_id,
-                "student_group": student_group,
+                "student_groups": student_groups,
                 "lecture_date": lecture_date.isoformat(),
                 "chunk_index": i,
             })
@@ -126,10 +124,9 @@ class LectureRAG:
             lecture = Lecture(
                 id=lecture_id,
                 record_id=record_id,
-                student_group=student_group,
+                student_groups=student_groups,
                 lecture_date=lecture_date,
                 content=doc.content,
-                abstract=abstract,
             )
             session.add(lecture)
 
@@ -261,7 +258,7 @@ class LectureRAG:
         try:
             query = session.query(Lecture)
             if student_group:
-                query = query.filter_by(student_group=student_group)
+                query = query.filter(Lecture.student_groups.contains([student_group]))
             return query.order_by(Lecture.lecture_date.desc()).limit(limit).all()
         finally:
             session.close()

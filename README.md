@@ -59,7 +59,6 @@ ai_lector/
      pyannote         Whisper        ├── Конспект
                                      ├── Вопросы
                                      ├── Майнд-карта
-                                     ├── Эмоции
                                      └── Подкаст скрипт
                                               │
                                               ▼
@@ -145,7 +144,8 @@ uvicorn app:app --host 0.0.0.0 --port 8000
 curl -X POST http://localhost:8000/analyze \
   -F "file=@lecture.mp3" \
   -F "record_id=rec-001" \
-  -F "group=CS-101" \
+  -F "groups=CS-101" \
+  -F "groups=CS-102" \
   -F "lecture_date=2025-01-15"
 ```
 
@@ -156,11 +156,11 @@ curl -X POST http://localhost:8000/analyze \
   "lecture_text": "Полная транскрипция лекции...",
   "abstract_text": "# Конспект\n...",
   "speech_speed": {"0": 120.5, "1": 135.2},
-  "mindmap": {"topic": "...", "subtopics": [...]},
-  "popular_words_no_stopw": [{"аудитория": 5}, {"лектор": 10}],
-  "popular_words_w_stopw": [...],
+  "mindmap": {"title": "...", "nodes": [...]},
+  "popular_words_no_stopw": [{}, {"слово": 10}],
+  "popular_words_w_stopw": [{}, {"и": 50}],
   "conversation_static": {"lecturer": 75.0, "discussion": 15.0, "quiet": 10.0},
-  "lecture_timeline": [["1", "текст", "2:30", "спокойный"], ...],
+  "lecture_timeline": [[1, "текст чанка", "2:30"], ...],
   "questions": ["Что такое...?", "Какие методы...?"],
   "podcast": "uuid.mp3"
 }
@@ -175,10 +175,9 @@ curl -X POST http://localhost:8000/lectures \
   -H "Content-Type: application/json" \
   -d '{
     "lecture_text": "Текст лекции...",
-    "student_group": "CS-101",
+    "student_groups": ["CS-101", "CS-102"],
     "lecture_date": "2025-01-15",
-    "record_id": "rec-001",
-    "abstract": "# Конспект..."
+    "record_id": "rec-001"
   }'
 ```
 
@@ -288,15 +287,14 @@ analyzer = LectureAnalyzer()
 rag = LectureRAG()
 
 # Анализ лекции
-result = analyzer.process("lecture.mp3", "rec-001", "CS-101")
+result = analyzer.process("lecture.mp3", "rec-001", ["CS-101"])
 
 # Добавление в RAG
 lecture_id = rag.add_lecture(
     lecture_text=result["lecture_text"],
-    student_group="CS-101",
+    student_groups=["CS-101"],
     lecture_date=date.today(),
     record_id="rec-001",
-    abstract=result["abstract_text"],
 )
 
 # Запрос к RAG

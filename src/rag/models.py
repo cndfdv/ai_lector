@@ -11,6 +11,7 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -23,10 +24,9 @@ class Lecture(Base):
 
     id = Column(String(36), primary_key=True)
     record_id = Column(String(255), unique=True, nullable=True)
-    student_group = Column(Text, nullable=False)
+    student_groups = Column(ARRAY(Text), nullable=False)
     lecture_date = Column(Date, nullable=False)
     content = Column(Text, nullable=False)
-    abstract = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     chunks = relationship(

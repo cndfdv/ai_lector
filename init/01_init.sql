@@ -2,10 +2,9 @@
 CREATE TABLE IF NOT EXISTS lectures (
     id VARCHAR(36) PRIMARY KEY,
     record_id VARCHAR(255) UNIQUE,
-    student_group TEXT NOT NULL,
+    student_groups TEXT[] NOT NULL,
     lecture_date DATE NOT NULL,
     content TEXT NOT NULL,
-    abstract TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -19,7 +18,7 @@ CREATE TABLE IF NOT EXISTS lecture_chunks (
 );
 
 -- Индексы для быстрого поиска
-CREATE INDEX IF NOT EXISTS idx_lectures_group ON lectures(student_group);
+CREATE INDEX IF NOT EXISTS idx_lectures_groups ON lectures USING GIN(student_groups);
 CREATE INDEX IF NOT EXISTS idx_lectures_date ON lectures(lecture_date);
 CREATE INDEX IF NOT EXISTS idx_lectures_record ON lectures(record_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_lecture ON lecture_chunks(lecture_id);

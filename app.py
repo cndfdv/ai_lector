@@ -21,10 +21,9 @@ class AddLectureRequest(BaseModel):
     """Запрос на добавление лекции в RAG."""
 
     lecture_text: str = Field(..., description="Полный текст лекции")
-    student_group: str = Field(..., description="Идентификатор студенческой группы")
+    student_groups: List[str] = Field(..., description="Список студенческих групп")
     lecture_date: datetime.date = Field(..., description="Дата лекции (YYYY-MM-DD)")
     record_id: Optional[str] = Field(None, description="Уникальный ID записи")
-    abstract: Optional[str] = Field(None, description="Конспект лекции (markdown)")
 
 
 class QueryRequest(BaseModel):
@@ -82,7 +81,7 @@ class AnalysisResponse(BaseModel):
         description="Распределение времени: lecturer %, discussion %, quiet %",
     )
     lecture_timeline: List[List] = Field(
-        ..., description="Таймлайн лекции с эмоциями"
+        ..., description="Таймлайн лекции (чанки с таймкодами)"
     )
     questions: List[str] = Field(
         ..., description="Вопросы для самопроверки (10-12 шт)"
@@ -95,9 +94,8 @@ class LectureInfo(BaseModel):
 
     id: str = Field(..., description="UUID лекции")
     record_id: Optional[str] = Field(None, description="ID записи")
-    student_group: str = Field(..., description="Студенческая группа")
+    student_groups: List[str] = Field(..., description="Студенческие группы")
     lecture_date: datetime.date = Field(..., description="Дата лекции")
-    abstract: Optional[str] = Field(None, description="Конспект")
 
 
 class LectureDetail(BaseModel):
@@ -105,10 +103,9 @@ class LectureDetail(BaseModel):
 
     id: str
     record_id: Optional[str] = None
-    student_group: str
+    student_groups: List[str]
     lecture_date: datetime.date
     content: str = Field(..., description="Полный текст лекции")
-    abstract: Optional[str] = None
 
 
 class QueryResponse(BaseModel):
@@ -187,7 +184,7 @@ app = FastAPI(
 async def analyze_lecture(
     file: UploadFile = File(..., description="Аудиофайл лекции (mp3 или wav)"),
     record_id: str = Form(..., description="Уникальный ID записи"),
-    group: str = Form(..., description="Идентификатор студенческой группы"),
+    groups: List[str] = Form(..., description="Список студенческих групп"),
     lecture_date: Optional[str] = Form(
         None, description="Дата лекции (YYYY-MM-DD), по умолчанию сегодня"
     ),
@@ -210,7 +207,7 @@ async def analyze_lecture(
     )
 
     try:
-        result = app.state.analyzer.process(tmp_path, record_id, group, date)
+        result = app.state.analyzer.process(tmp_path, record_id, groups, date, rag=app.state.rag)
     except FileNotFoundError:
         raise HTTPException(404, "Аудиофайл не найден")
     except Exception as e:
@@ -237,10 +234,9 @@ async def analyze_lecture(
 async def add_lecture(req: AddLectureRequest):
     lecture_id = app.state.rag.add_lecture(
         lecture_text=req.lecture_text,
-        student_group=req.student_group,
+        student_groups=req.student_groups,
         lecture_date=req.lecture_date,
         record_id=req.record_id,
-        abstract=req.abstract,
     )
     return AddLectureResponse(lecture_id=lecture_id)
 
@@ -263,9 +259,8 @@ async def list_lectures(
         LectureInfo(
             id=lec.id,
             record_id=lec.record_id,
-            student_group=lec.student_group,
+            student_groups=lec.student_groups,
             lecture_date=lec.lecture_date,
-            abstract=lec.abstract,
         )
         for lec in lectures
     ]
@@ -285,10 +280,9 @@ async def get_lecture(lecture_id: str):
     return LectureDetail(
         id=lecture.id,
         record_id=lecture.record_id,
-        student_group=lecture.student_group,
+        student_groups=lecture.student_groups,
         lecture_date=lecture.lecture_date,
         content=lecture.content,
-        abstract=lecture.abstract,
     )
 
 

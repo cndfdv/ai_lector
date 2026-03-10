@@ -1,5 +1,6 @@
 """Lecture RAG module for storing and querying lecture content."""
 
+import json
 import uuid
 from datetime import date
 from typing import List, Optional
@@ -105,7 +106,7 @@ class LectureRAG:
             texts.append(chunk_text)
             metadatas.append({
                 "lecture_id": lecture_id,
-                "student_groups": student_groups,
+                "student_groups": json.dumps(student_groups),
                 "lecture_date": lecture_date.isoformat(),
                 "chunk_index": i,
             })

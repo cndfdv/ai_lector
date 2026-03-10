@@ -1,5 +1,6 @@
 """Retrieval tools for agentic RAG."""
 
+import json
 from typing import List, Optional
 
 from langchain_community.vectorstores import Milvus
@@ -17,6 +18,18 @@ class RAGRetriever:
         """
         self.vector_store = vector_store
 
+    @staticmethod
+    def _deserialize_metadata(docs: List[Document]) -> List[Document]:
+        """Deserialize JSON-encoded metadata fields from Milvus."""
+        for doc in docs:
+            sg = doc.metadata.get("student_groups")
+            if isinstance(sg, str):
+                try:
+                    doc.metadata["student_groups"] = json.loads(sg)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        return docs
+
     def semantic_search(self, query: str, k: int = 5) -> List[Document]:
         """Search for relevant lecture content based on semantic similarity.
 
@@ -27,7 +40,8 @@ class RAGRetriever:
         Returns:
             List of relevant documents.
         """
-        return self.vector_store.similarity_search(query, k=k)
+        docs = self.vector_store.similarity_search(query, k=k)
+        return self._deserialize_metadata(docs)
 
     def search_by_group(
         self,
@@ -45,11 +59,12 @@ class RAGRetriever:
         Returns:
             Relevant content from the specified group's lectures.
         """
-        return self.vector_store.similarity_search(
+        docs = self.vector_store.similarity_search(
             query,
             k=k,
-            filter=f'array_contains(student_groups, "{student_group}")',
+            filter=f'student_groups like "%{student_group}%"',
         )
+        return self._deserialize_metadata(docs)
 
     def search_by_date_range(
         self,
@@ -69,13 +84,14 @@ class RAGRetriever:
         Returns:
             Relevant content from lectures in the date range.
         """
-        return self.vector_store.similarity_search(
+        docs = self.vector_store.similarity_search(
             query,
             k=k,
             filter={
                 "lecture_date": {"$gte": start_date, "$lte": end_date},
             },
         )
+        return self._deserialize_metadata(docs)
 
     def format_documents(self, docs: List[Document]) -> str:
         """Format documents for context.

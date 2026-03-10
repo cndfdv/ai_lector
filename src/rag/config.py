@@ -16,11 +16,11 @@ class RAGConfig:
     pg_user: str = os.getenv("POSTGRES_USER", "user")
     pg_password: str = os.getenv("POSTGRES_PASSWORD", "password")
     pg_db: str = os.getenv("POSTGRES_DB", "lectures")
-    pg_host: str = os.getenv("POSTGRES_HOST", "pg")
+    pg_host: str = os.getenv("POSTGRES_HOST", "localhost")
     pg_port: str = os.getenv("POSTGRES_PORT", "5433")
 
     # Milvus
-    milvus_host: str = os.getenv("MILVUS_HOST", "milvus")
+    milvus_host: str = os.getenv("MILVUS_HOST", "localhost")
     milvus_port: int = int(os.getenv("MILVUS_PORT", "19530"))
     milvus_collection: str = os.getenv("MILVUS_COLLECTION", "lectures")
 

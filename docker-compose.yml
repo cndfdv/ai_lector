@@ -1,34 +1,39 @@
-
-
 services:
   pg:
     image: postgres:13
+    container_name: ai_lector_pg
     restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "${POSTGRES_PORT}:${POSTGRES_PORT}"
+      - "${POSTGRES_PORT}:5432"
     volumes:
-      - pg_data_isolated:/var/lib/postgresql/data
+      - pg_data:/var/lib/postgresql/data
       - ./init:/docker-entrypoint-initdb.d
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
 
   etcd:
-    image: quay.io/coreos/etcd:v3.5.7
+    image: quay.io/coreos/etcd:v3.5.18
+    container_name: ai_lector_etcd
     restart: always
     environment:
-      ETCD_AUTO_COMPACTION_MODE: revision
-      ETCD_AUTO_COMPACTION_RETENTION: "1000"
-      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
-      ETCD_SNAPSHOT_COUNT: "50000"
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
     volumes:
-      - etcd_data_isolated:/etcd
-    command:
-      - etcd
-      - --advertise-client-urls=http://etcd:${ETCD_PORT}
-      - --listen-client-urls=http://0.0.0.0:${ETCD_PORT}
-      - --data-dir=/etcd
+      - etcd_data:/etcd
+    networks:
+      - backend
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
     healthcheck:
       test: ["CMD", "etcdctl", "endpoint", "health"]
       interval: 30s
@@ -36,17 +41,20 @@ services:
       retries: 3
 
   minio:
-    image: minio/minio:RELEASE.2024-01-11T07-46-16Z
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    container_name: ai_lector_minio
     restart: always
     environment:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
-    command: server /data --console-address ":9001"
+    command: minio server /minio_data --console-address ":9001"
     ports:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - minio_data_isolated:/data
+      - minio_data:/minio_data
+    networks:
+      - backend
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
@@ -54,22 +62,26 @@ services:
       retries: 3
 
   milvus:
-    image: milvusdb/milvus:v2.4.0
+    image: milvusdb/milvus:v2.6.0
+    container_name: ai_lector_milvus
     restart: always
     command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
     environment:
-      ETCD_ENDPOINTS: etcd:${ETCD_PORT}
+      ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
+      MQ_TYPE: woodpecker
     ports:
       - "${MILVUS_PORT}:19530"
       - "9091:9091"
-    depends_on:
-      etcd:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
     volumes:
-      - milvus_data_isolated:/var/lib/milvus
+      - milvus_data:/var/lib/milvus
+    networks:
+      - backend
+    depends_on:
+      - etcd
+      - minio
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
       interval: 30s
@@ -77,8 +89,22 @@ services:
       timeout: 20s
       retries: 3
 
+  attu:
+    image: zilliz/attu:v2.4
+    container_name: ai_lector_attu
+    restart: always
+    environment:
+      MILVUS_URL: milvus:19530
+    ports:
+      - "3000:3000"
+    networks:
+      - backend
+    depends_on:
+      - milvus
+
   app:
     build: .
+    container_name: ai_lector_app
     restart: always
     ports:
       - "8000:8000"
@@ -89,9 +115,13 @@ services:
     environment:
       - POSTGRES_HOST=pg
       - MILVUS_HOST=milvus
+    networks:
+      - backend
     depends_on:
-      - pg
-      - milvus
+      pg:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
     deploy:
       resources:
         reservations:
@@ -101,13 +131,11 @@ services:
               capabilities: [gpu]
 
 volumes:
-  pg_data_isolated:
-  milvus_data_isolated:
-  etcd_data_isolated:
-  minio_data_isolated:
+  pg_data:
+  milvus_data:
+  etcd_data:
+  minio_data:
 
 networks:
-  default:
-    ipam:
-      config:
-        - subnet: ${DOCKER_SUBNET}
+  backend:
+    driver: bridge

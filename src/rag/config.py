@@ -21,7 +21,7 @@ class RAGConfig:
 
     # Milvus
     milvus_host: str = os.getenv("MILVUS_HOST", "milvus")
-    milvus_port: int = int(os.getenv("MILVUS_PORT", "19531"))
+    milvus_port: int = int(os.getenv("MILVUS_PORT", "19530"))
     milvus_collection: str = os.getenv("MILVUS_COLLECTION", "lectures")
 
     # LLM

@@ -207,10 +207,18 @@ curl -X DELETE http://localhost:8000/lectures/uuid-here
 
 #### `POST /query` — Вопрос по лекциям
 
+Поддерживает фильтрацию по студенческой группе — ответ будет сгенерирован только на основе лекций указанной группы.
+
 ```bash
+# Вопрос по всем лекциям
 curl -X POST http://localhost:8000/query \
   -H "Content-Type: application/json" \
   -d '{"question": "Что такое нейронная сеть?"}'
+
+# Вопрос с фильтрацией по группе
+curl -X POST http://localhost:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Что такое нейронная сеть?", "student_group": "CS-101"}'
 ```
 
 Ответ:
@@ -219,7 +227,7 @@ curl -X POST http://localhost:8000/query \
 {
   "answer": "Нейронная сеть — это...",
   "sources": [
-    {"lecture_id": "...", "student_group": "CS-101", "lecture_date": "2025-01-15"}
+    {"lecture_id": "...", "student_groups": ["CS-101"], "lecture_date": "2025-01-15"}
   ],
   "rewritten_question": "определение нейронной сети архитектура"
 }

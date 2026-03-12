@@ -30,6 +30,7 @@ class QueryRequest(BaseModel):
     """Запрос к RAG системе."""
 
     question: str = Field(..., description="Вопрос по лекциям")
+    student_group: Optional[str] = Field(None, description="Фильтр по студенческой группе")
 
 
 class SearchRequest(BaseModel):
@@ -316,7 +317,7 @@ async def delete_lecture(lecture_id: str):
     tags=["RAG"],
 )
 async def query_rag(req: QueryRequest):
-    result = app.state.rag.query(req.question)
+    result = app.state.rag.query(req.question, student_group=req.student_group)
     return QueryResponse(**result)
 
 

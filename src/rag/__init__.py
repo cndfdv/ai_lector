@@ -147,16 +147,17 @@ class LectureRAG:
 
         return lecture_id
 
-    def query(self, question: str) -> dict:
+    def query(self, question: str, student_group: Optional[str] = None) -> dict:
         """Query the RAG system: rewrite → retrieve → generate.
 
         Args:
             question: User question.
+            student_group: Optional student group filter.
 
         Returns:
             Dict with answer, sources, and rewritten_question.
         """
-        return self._agent.query(question)
+        return self._agent.query(question, student_group=student_group)
 
     def simple_search(self, query: str, k: Optional[int] = None) -> List[Document]:
         """Simple similarity search without agentic reasoning.

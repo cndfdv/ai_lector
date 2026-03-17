@@ -1,6 +1,8 @@
 import datetime
 import json
+import logging
 import os
+import random
 import re
 import uuid
 from collections import Counter
@@ -27,10 +29,13 @@ from src.prompts import (
     CLEAN_PODCAST_PROMPT,
     EMOT_AN_PROMPT,
     MINDMAP_PROMPT,
+    PODCAST_INTROS,
+    PODCAST_OUTROS,
     PODCAST_PROMPT,
 )
 
 STOPWORDS_PATH = "src/stopwords.txt"
+logger = logging.getLogger(__name__)
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 # =============================================================================
@@ -779,7 +784,7 @@ class LectureAnalyzer:
         except Exception:
             return []
 
-    def _generate_mindmap(self, lecture_text: str, max_retries: int = 3) -> dict:
+    def _generate_mindmap(self, lecture_text: str, max_retries: int = 10) -> dict:
         """Generate mind map structure.
 
         Args:
@@ -789,7 +794,6 @@ class LectureAnalyzer:
         Returns:
             Dict with mind map structure.
         """
-        last_error = None
         for attempt in range(max_retries):
             try:
                 response = self.llm.invoke(
@@ -797,13 +801,9 @@ class LectureAnalyzer:
                 )
                 return parse_json(self._extract_llm_response(response))
             except Exception as e:
-                last_error = e
-                if attempt < max_retries - 1:
-                    continue  # Retry
-        # All retries failed
-        raise ValueError(
-            f"Не удалось сгенерировать mindmap после {max_retries} попыток: {last_error}"
-        )
+                logger.warning("Mindmap: попытка %d/%d не удалась: %s", attempt + 1, max_retries, e)
+        logger.error("Не удалось сгенерировать mindmap после %d попыток", max_retries)
+        return {"title": "Не удалось сгенерировать", "nodes": []}
 
     def _analyze_emotion(self, text: str) -> str:
         """Analyze emotional tone of a text fragment.
@@ -817,12 +817,13 @@ class LectureAnalyzer:
         response = self.llm.invoke(f"{EMOT_AN_PROMPT}\n\nФрагмент:\n{text}")
         return self._extract_llm_response(response).strip()
 
-    def _generate_podcast_script(self, lecture_text: str, questions: List[str]) -> dict:
+    def _generate_podcast_script(self, lecture_text: str, questions: List[str], max_retries: int = 5) -> dict:
         """Generate podcast script using structured output with reasoning.
 
         Args:
             lecture_text: Full lecture transcription.
             questions: List of questions for the podcast.
+            max_retries: Maximum number of retry attempts.
 
         Returns:
             Dict with podcast parts.
@@ -844,16 +845,19 @@ class LectureAnalyzer:
                 "format_instructions": self.podcast_parser.get_format_instructions(),
             },
         )
-        response = self.llm.invoke(
-            prompt.invoke(
-                {"lecture_text": lecture_text, "questions_str": questions_str}
-            )
-        )
-        text = self._extract_llm_response(response)
-        try:
-            return self.podcast_parser.invoke(text)
-        except Exception:
-            return {"parts": []}
+        for attempt in range(max_retries):
+            try:
+                response = self.llm.invoke(
+                    prompt.invoke(
+                        {"lecture_text": lecture_text, "questions_str": questions_str}
+                    )
+                )
+                text = self._extract_llm_response(response)
+                return self.podcast_parser.invoke(text)
+            except Exception as e:
+                logger.warning("Подкаст: попытка %d/%d не удалась: %s", attempt + 1, max_retries, e)
+        logger.error("Не удалось сгенерировать подкаст после %d попыток", max_retries)
+        return {"parts": []}
 
     def _clean_podcast_part(self, part: dict) -> dict:
         """Clean a single podcast part for TTS.
@@ -889,8 +893,16 @@ class LectureAnalyzer:
             Cleaned podcast script formatted for generate_podcast function.
         """
         cleaned_parts = {}
+
+        intro = random.choice(PODCAST_INTROS)
+        cleaned_parts["part_0"] = intro
+
         for i, part in enumerate(podcast_script.get("parts", [])):
             cleaned_parts[f"part_{i + 1}"] = self._clean_podcast_part(part)
+
+        outro = random.choice(PODCAST_OUTROS)
+        cleaned_parts[f"part_{len(podcast_script.get('parts', [])) + 1}"] = outro
+
         return cleaned_parts
 
     def process(
@@ -931,13 +943,16 @@ class LectureAnalyzer:
         llm_result = self._llm_analyze(transcription.lecture_text)
 
         clean_fragment_path = extract_clean_fragment(transcription.chunks, audio)
-        podcast_path = generate_podcast(
-            llm_result["podcast_text"],
-            clean_fragment_path,
-            audio.wav_path,
-            self.f5tts,
-            self.accentizer,
-        )
+        if llm_result["podcast_text_ok"]:
+            podcast_path = generate_podcast(
+                llm_result["podcast_text"],
+                clean_fragment_path,
+                audio.wav_path,
+                self.f5tts,
+                self.accentizer,
+            )
+        else:
+            podcast_path = None
 
         clear_gpu_cache()
 
@@ -1003,12 +1018,14 @@ class LectureAnalyzer:
         questions = self._generate_questions(lecture_text)
 
         podcast_script = self._generate_podcast_script(lecture_text, questions)
+        podcast_text_ok = len(podcast_script.get("parts", [])) > 0
 
-        podcast_text = self._clean_podcast(podcast_script)
+        podcast_text = self._clean_podcast(podcast_script) if podcast_text_ok else {}
 
         return {
             "abstract_text": abstract_text,
             "mind_map": mind_map,
             "questions": questions,
             "podcast_text": podcast_text,
+            "podcast_text_ok": podcast_text_ok,
         }

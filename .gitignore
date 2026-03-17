@@ -2,10 +2,11 @@
 *wav
 some_audios/
 F5TTS/
+F5TTS.tar.gz
 data/
 *pyc
 *pkl
 *faiss
 TODO.md
 .vscode/
-.env
+.env1

@@ -62,7 +62,7 @@ class RAGRetriever:
         docs = self.vector_store.similarity_search(
             query,
             k=k,
-            filter=f'student_groups like "%{student_group}%"',
+            expr=f'student_groups like "%{student_group}%"',
         )
         return self._deserialize_metadata(docs)
 
@@ -87,9 +87,7 @@ class RAGRetriever:
         docs = self.vector_store.similarity_search(
             query,
             k=k,
-            filter={
-                "lecture_date": {"$gte": start_date, "$lte": end_date},
-            },
+            expr=f'lecture_date >= "{start_date}" and lecture_date <= "{end_date}"',
         )
         return self._deserialize_metadata(docs)
 

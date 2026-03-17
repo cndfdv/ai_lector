@@ -210,7 +210,7 @@ curl -X DELETE http://localhost:8000/lectures/uuid-here
 ```bash
 curl -X POST http://localhost:8000/query \
   -H "Content-Type: application/json" \
-  -d '{"question": "Что такое нейронная сеть?"}'
+  -d '{"question": "Что такое нейронная сеть?", "student_group": "CS-101"}'
 ```
 
 Ответ:

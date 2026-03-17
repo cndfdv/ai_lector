@@ -36,6 +36,7 @@ class AgentState(TypedDict):
     """State for the RAG workflow."""
 
     question: str
+    student_group: Optional[str]
     rewritten_question: Optional[str]
     documents: List[str]
     document_metadata: List[dict]
@@ -79,9 +80,13 @@ class AgenticRAG:
         return {"rewritten_question": rewritten.strip()}
 
     def _retrieve(self, state: AgentState) -> dict:
-        """Retrieve top-k relevant documents."""
+        """Retrieve top-k relevant documents, optionally filtered by group."""
         query = state.get("rewritten_question") or state["question"]
-        docs = self.retriever.semantic_search(query, k=self.config.top_k)
+        student_group = state.get("student_group")
+        if student_group:
+            docs = self.retriever.search_by_group(query, student_group, k=self.config.top_k)
+        else:
+            docs = self.retriever.semantic_search(query, k=self.config.top_k)
         return {
             "documents": [doc.page_content for doc in docs],
             "document_metadata": [doc.metadata for doc in docs],
@@ -99,17 +104,19 @@ class AgenticRAG:
         })
         return {"generation": generation}
 
-    def query(self, question: str) -> dict:
+    def query(self, question: str, student_group: Optional[str] = None) -> dict:
         """Answer a question using RAG.
 
         Args:
             question: User question.
+            student_group: Optional group filter for retrieval.
 
         Returns:
             Dict with answer, sources, and rewritten_question.
         """
         initial_state: AgentState = {
             "question": question,
+            "student_group": student_group,
             "rewritten_question": None,
             "documents": [],
             "document_metadata": [],

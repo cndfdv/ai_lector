@@ -91,6 +91,33 @@ class RAGRetriever:
         )
         return self._deserialize_metadata(docs)
 
+    def search_by_date_range_and_group(
+        self,
+        query: str,
+        start_date: str,
+        end_date: str,
+        student_group: str,
+        k: int = 5,
+    ) -> List[Document]:
+        """Search lectures within a date range for a specific student group.
+
+        Args:
+            query: Search query.
+            start_date: Start date (YYYY-MM-DD).
+            end_date: End date (YYYY-MM-DD).
+            student_group: Student group identifier.
+            k: Number of results.
+
+        Returns:
+            Relevant content from the specified group's lectures in the date range.
+        """
+        expr = (
+            f'lecture_date >= "{start_date}" and lecture_date <= "{end_date}"'
+            f' and student_groups like "%{student_group}%"'
+        )
+        docs = self.vector_store.similarity_search(query, k=k, expr=expr)
+        return self._deserialize_metadata(docs)
+
     def format_documents(self, docs: List[Document]) -> str:
         """Format documents for context.
 

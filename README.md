@@ -40,8 +40,9 @@ ai_lector/
 │   └── 01_init.sql                 # Инициализация БД (таблицы, индексы)
 │
 ├── data/txt_data/                  # Текстовые данные лекций
-├── test.ipynb                      # Тесты на реальных аудио
-└── build_rag.ipynb                 # Тесты RAG
+├── test_results.ipynb              # Тесты полного пайплайна на реальных аудио
+├── mini_tests.ipynb                # Пошаговые тесты отдельных функций
+└── test_rag.ipynb                  # Тесты RAG
 ```
 
 ## Архитектура
@@ -94,7 +95,7 @@ POSTGRES_HOST=localhost
 
 # Milvus
 MILVUS_HOST=localhost
-MILVUS_PORT=19531
+MILVUS_PORT=19530
 MILVUS_COLLECTION=lectures
 
 # LLM
@@ -213,14 +214,11 @@ curl -X DELETE http://localhost:8000/lectures/uuid-here
 # Вопрос по всем лекциям
 curl -X POST http://localhost:8000/query \
   -H "Content-Type: application/json" \
-<<<<<<< HEAD
-=======
   -d '{"question": "Что такое нейронная сеть?"}'
 
 # Вопрос с фильтрацией по группе
 curl -X POST http://localhost:8000/query \
   -H "Content-Type: application/json" \
->>>>>>> 4cae2f1993015b64638f11734e1a02d34cabc17f
   -d '{"question": "Что такое нейронная сеть?", "student_group": "CS-101"}'
 ```
 
@@ -260,6 +258,14 @@ curl -X POST http://localhost:8000/search/dates \
   -d '{"query": "...", "start_date": "2025-01-01", "end_date": "2025-06-30", "k": 5}'
 ```
 
+#### `POST /search/dates/group` — Поиск по датам и группе
+
+```bash
+curl -X POST http://localhost:8000/search/dates/group \
+  -H "Content-Type: application/json" \
+  -d '{"query": "...", "start_date": "2025-01-01", "end_date": "2025-06-30", "student_group": "CS-101", "k": 5}'
+```
+
 ## Стек
 
 | Компонент | Технология |
@@ -282,7 +288,7 @@ curl -X POST http://localhost:8000/search/dates \
 |--------|---------------|-----------|
 | `app` | 8000 | FastAPI сервис |
 | `pg` | 5433 | PostgreSQL (метаданные лекций) |
-| `milvus` | 19531 | Milvus (векторный поиск) |
+| `milvus` | 19530 | Milvus (векторный поиск) |
 | `etcd` | 2379 | etcd (для Milvus) |
 | `minio` | 9001 | MinIO (хранилище для Milvus) |
 

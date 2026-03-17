@@ -152,11 +152,7 @@ class LectureRAG:
 
         Args:
             question: User question.
-<<<<<<< HEAD
             student_group: Optional group filter for retrieval.
-=======
-            student_group: Optional student group filter.
->>>>>>> 4cae2f1993015b64638f11734e1a02d34cabc17f
 
         Returns:
             Dict with answer, sources, and rewritten_question.
@@ -215,6 +211,20 @@ class LectureRAG:
         """
         k = k or self.config.top_k
         return self._retriever.search_by_date_range(query, start_date, end_date, k=k)
+
+    def search_by_date_range_and_group(
+        self,
+        query: str,
+        start_date: str,
+        end_date: str,
+        student_group: str,
+        k: Optional[int] = None,
+    ) -> List[Document]:
+        """Search lectures within a date range for a specific student group."""
+        k = k or self.config.top_k
+        return self._retriever.search_by_date_range_and_group(
+            query, start_date, end_date, student_group, k=k
+        )
 
     def get_lecture(self, lecture_id: str) -> Optional[Lecture]:
         """Get lecture by ID.

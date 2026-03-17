@@ -57,6 +57,16 @@ class DateSearchRequest(BaseModel):
     k: int = Field(5, ge=1, le=50, description="Количество результатов")
 
 
+class DateGroupSearchRequest(BaseModel):
+    """Запрос на поиск по диапазону дат и группе."""
+
+    query: str = Field(..., description="Поисковый запрос")
+    start_date: str = Field(..., description="Начальная дата (YYYY-MM-DD)")
+    end_date: str = Field(..., description="Конечная дата (YYYY-MM-DD)")
+    student_group: str = Field(..., description="Идентификатор студенческой группы")
+    k: int = Field(5, ge=1, le=50, description="Количество результатов")
+
+
 # =============================================================================
 # Pydantic Models — Response
 # =============================================================================
@@ -361,6 +371,23 @@ async def search_by_group(req: GroupSearchRequest):
 async def search_by_dates(req: DateSearchRequest):
     docs = app.state.rag.search_by_date_range(
         req.query, req.start_date, req.end_date, k=req.k
+    )
+    return [
+        SearchResult(content=doc.page_content, metadata=doc.metadata)
+        for doc in docs
+    ]
+
+
+@app.post(
+    "/search/dates/group",
+    response_model=List[SearchResult],
+    summary="Поиск по датам и группе",
+    description="Семантический поиск в лекциях конкретной группы за указанный период.",
+    tags=["RAG"],
+)
+async def search_by_dates_and_group(req: DateGroupSearchRequest):
+    docs = app.state.rag.search_by_date_range_and_group(
+        req.query, req.start_date, req.end_date, req.student_group, k=req.k
     )
     return [
         SearchResult(content=doc.page_content, metadata=doc.metadata)

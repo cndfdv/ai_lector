@@ -687,7 +687,7 @@ class LectureAnalyzer:
         f5tts = F5TTS(
             ckpt_file="F5TTS/ckpts/model_v4.safetensors",
             vocab_file="F5TTS/ckpts/vocab.txt",
-            device="cuda",
+            device=self.device,
         )
         accentizer = RUAccent()
         accentizer.load(
@@ -982,7 +982,7 @@ class LectureAnalyzer:
         Returns:
             JSON string with all analysis results.
         """
-        result = self.process(recording_path, record_id, group, lection_date)
+        result = self.process(recording_path, record_id, [group], lection_date)
         return json.dumps(result, default=str)
 
     def _llm_analyze(self, lecture_text: str) -> dict:

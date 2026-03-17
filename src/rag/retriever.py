@@ -1,7 +1,7 @@
 """Retrieval tools for agentic RAG."""
 
 import json
-from typing import List, Optional
+from typing import List
 
 from langchain_community.vectorstores import Milvus
 from langchain_core.documents import Document

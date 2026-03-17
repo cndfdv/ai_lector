@@ -104,12 +104,14 @@ class LectureRAG:
             chunk_id = f"{lecture_id}_{i}"
 
             texts.append(chunk_text)
-            metadatas.append({
-                "lecture_id": lecture_id,
-                "student_groups": json.dumps(student_groups),
-                "lecture_date": lecture_date.isoformat(),
-                "chunk_index": i,
-            })
+            metadatas.append(
+                {
+                    "lecture_id": lecture_id,
+                    "student_groups": json.dumps(student_groups),
+                    "lecture_date": lecture_date.isoformat(),
+                    "chunk_index": i,
+                }
+            )
             chunk_ids.append(chunk_id)
 
         # Add to vector store

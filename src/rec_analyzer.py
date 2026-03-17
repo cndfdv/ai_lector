@@ -801,7 +801,9 @@ class LectureAnalyzer:
                 )
                 return parse_json(self._extract_llm_response(response))
             except Exception as e:
-                logger.warning("Mindmap: попытка %d/%d не удалась: %s", attempt + 1, max_retries, e)
+                logger.warning(
+                    "Mindmap: попытка %d/%d не удалась: %s", attempt + 1, max_retries, e
+                )
         logger.error("Не удалось сгенерировать mindmap после %d попыток", max_retries)
         return {"title": "Не удалось сгенерировать", "nodes": []}
 
@@ -817,7 +819,9 @@ class LectureAnalyzer:
         response = self.llm.invoke(f"{EMOT_AN_PROMPT}\n\nФрагмент:\n{text}")
         return self._extract_llm_response(response).strip()
 
-    def _generate_podcast_script(self, lecture_text: str, questions: List[str], max_retries: int = 5) -> dict:
+    def _generate_podcast_script(
+        self, lecture_text: str, questions: List[str], max_retries: int = 10
+    ) -> dict:
         """Generate podcast script using structured output with reasoning.
 
         Args:
@@ -855,7 +859,9 @@ class LectureAnalyzer:
                 text = self._extract_llm_response(response)
                 return self.podcast_parser.invoke(text)
             except Exception as e:
-                logger.warning("Подкаст: попытка %d/%d не удалась: %s", attempt + 1, max_retries, e)
+                logger.warning(
+                    "Подкаст: попытка %d/%d не удалась: %s", attempt + 1, max_retries, e
+                )
         logger.error("Не удалось сгенерировать подкаст после %d попыток", max_retries)
         return {"parts": []}
 

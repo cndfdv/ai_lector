@@ -84,7 +84,9 @@ class AgenticRAG:
         query = state.get("rewritten_question") or state["question"]
         student_group = state.get("student_group")
         if student_group:
-            docs = self.retriever.search_by_group(query, student_group, k=self.config.top_k)
+            docs = self.retriever.search_by_group(
+                query, student_group, k=self.config.top_k
+            )
         else:
             docs = self.retriever.semantic_search(query, k=self.config.top_k)
         return {
@@ -98,10 +100,12 @@ class AgenticRAG:
         prompt = ChatPromptTemplate.from_template(GENERATION_PROMPT)
         chain = prompt | self.llm | ReasoningOutputParser()
 
-        generation = chain.invoke({
-            "context": context,
-            "question": state["question"],
-        })
+        generation = chain.invoke(
+            {
+                "context": context,
+                "question": state["question"],
+            }
+        )
         return {"generation": generation}
 
     def query(self, question: str, student_group: Optional[str] = None) -> dict:

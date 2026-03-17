@@ -152,7 +152,11 @@ class LectureRAG:
 
         Args:
             question: User question.
+<<<<<<< HEAD
             student_group: Optional group filter for retrieval.
+=======
+            student_group: Optional student group filter.
+>>>>>>> 4cae2f1993015b64638f11734e1a02d34cabc17f
 
         Returns:
             Dict with answer, sources, and rewritten_question.

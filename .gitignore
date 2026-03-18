@@ -9,4 +9,5 @@ data/
 *faiss
 TODO.md
 .vscode/
-.env1
+.env
+test_md_texts.md

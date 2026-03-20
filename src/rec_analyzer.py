@@ -8,7 +8,7 @@ import uuid
 from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 import torch
@@ -24,6 +24,7 @@ from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 
 from F5TTS.f5_tts.api import F5TTS
 from src.llm_models import PodcastScript, QuestionsResult
+from src.rag import LectureRAG
 from src.prompts import (
     ABSTRACT_PROMPT,
     CLEAN_PODCAST_PROMPT,
@@ -658,6 +659,9 @@ class LectureAnalyzer:
         self.questions_parser = JsonOutputParser(pydantic_object=QuestionsResult)
         self.podcast_parser = JsonOutputParser(pydantic_object=PodcastScript)
 
+        # RAG по умолчанию
+        self.rag = LectureRAG()
+
     def _load_diarization_pipeline(self, api_key: str) -> Pipeline:
         """Load pyannote speaker diarization pipeline."""
         return Pipeline.from_pretrained(
@@ -917,7 +921,7 @@ class LectureAnalyzer:
         record_id: str,
         groups: List[str],
         lection_date: datetime.date = None,
-        rag: Optional[Any] = None,
+        use_rag: bool = True,
     ) -> dict:
         """Process a single lecture recording.
 
@@ -962,13 +966,16 @@ class LectureAnalyzer:
 
         clear_gpu_cache()
 
-        if rag is not None:
-            rag.add_lecture(
-                lecture_text=transcription.lecture_text,
-                student_groups=groups,
-                lecture_date=lection_date,
-                record_id=record_id,
-            )
+        if use_rag:
+            try:
+                self.rag.add_lecture(
+                    lecture_text=transcription.lecture_text,
+                    student_groups=groups,
+                    lecture_date=lection_date,
+                    record_id=record_id,
+                )
+            except Exception as e:
+                logger.error("Не удалось добавить лекцию в RAG (record_id=%s): %s", record_id, e)
 
         return {
             "lecture_text": transcription.lecture_text,

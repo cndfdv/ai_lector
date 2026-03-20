@@ -139,7 +139,16 @@ uvicorn app:app --host 0.0.0.0 --port 8000
 
 #### `POST /analyze` — Полный анализ аудиозаписи
 
-Принимает аудиофайл (mp3/wav), выполняет полный пайплайн анализа.
+Принимает аудиофайл (mp3/wav), выполняет полный пайплайн: диаризация → транскрипция → LLM-анализ → генерация подкаста. Автоматически сохраняет лекцию в RAG.
+
+Формат запроса: `multipart/form-data`.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `file` | file, **required** | Аудиофайл лекции (`.mp3` или `.wav`) |
+| `record_id` | string, **required** | Уникальный ID записи |
+| `groups` | string[], **required** | Список студенческих групп (можно указать несколько раз) |
+| `lecture_date` | string, optional | Дата лекции (`YYYY-MM-DD`), по умолчанию сегодня |
 
 ```bash
 curl -X POST http://localhost:8000/analyze \
@@ -150,22 +159,79 @@ curl -X POST http://localhost:8000/analyze \
   -F "lecture_date=2025-01-15"
 ```
 
-Ответ:
+Ответ (`AnalysisResponse`):
 
-```json
+```jsonc
 {
-  "lecture_text": "Полная транскрипция лекции...",
-  "abstract_text": "# Конспект\n...",
-  "speech_speed": {"0": 120.5, "1": 135.2},
-  "mindmap": {"title": "...", "nodes": [...]},
-  "popular_words_no_stopw": [{}, {"слово": 10}],
-  "popular_words_w_stopw": [{}, {"и": 50}],
-  "conversation_static": {"lecturer": 75.0, "discussion": 15.0, "quiet": 10.0},
-  "lecture_timeline": [[1, "текст чанка", "2:30"], ...],
-  "questions": ["Что такое...?", "Какие методы...?"],
-  "podcast": "uuid.mp3"
+  // Полная транскрипция лекции (string)
+  "lecture_text": "Добрый день, сегодня мы поговорим о...",
+
+  // Конспект в формате markdown (string)
+  "abstract_text": "# Тема лекции\n\n## Введение\n...",
+
+  // Скорость речи по минутам: ключ — номер минуты, значение — слов/мин (object<string, float>)
+  "speech_speed": {
+    "0": 120.5,
+    "1": 135.2,
+    "2": 98.0
+  },
+
+  // Майнд-карта: иерархическая структура тем лекции (object)
+  "mindmap": {
+    "title": "Название лекции",
+    "nodes": [
+      {
+        "id": "тема 1",
+        "label": "Основная тема",
+        "children": [
+          {
+            "id": "подтема 1.1",
+            "label": "Подтема",
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+
+  // Частотные слова БЕЗ стоп-слов: [аудитория, лектор] (array[object<string, int>])
+  // Каждый элемент — словарь {слово: количество}, топ-10
+  "popular_words_no_stopw": [
+    {"нейронный": 12, "модель": 8},
+    {"обучение": 25, "данные": 18}
+  ],
+
+  // Частотные слова СО стоп-словами: [аудитория, лектор] (array[object<string, int>])
+  "popular_words_w_stopw": [
+    {"и": 50, "в": 35, "что": 28},
+    {"это": 45, "мы": 30, "и": 28}
+  ],
+
+  // Распределение времени лекции в процентах (object<string, float>)
+  "conversation_static": {
+    "lecturer": 75.0,   // % времени — лектор говорит
+    "discussion": 15.0,  // % времени — диалог/вопросы аудитории
+    "quiet": 10.0        // % времени — тишина/паузы
+  },
+
+  // Таймлайн лекции: список чанков (array[array])
+  // Каждый элемент: [speaker_id, "текст фрагмента", "мин:сек"]
+  // speaker_id: 1 = лектор, 2 = аудитория
+  "lecture_timeline": [
+    [1, "Добрый день, начнём лекцию", "0:0"],
+    [2, "А можно вопрос?", "2:30"],
+    [1, "Конечно, слушаю", "2:45"]
+  ],
+
+  // Вопросы для самопроверки, 12 штук (array[string])
+  "questions": [
+    "Что такое нейронная сеть?",
+    "Какие функции активации существуют?"
+  ],
+
+  // Путь к сгенерированному подкасту, null если не удалось (string | null)
+  "podcast": "a1b2c3d4.mp3"
 }
-```
 
 ### RAG — Управление лекциями
 
@@ -182,7 +248,18 @@ curl -X POST http://localhost:8000/lectures \
   }'
 ```
 
+Ответ:
+
+```json
+{"lecture_id": "550e8400-e29b-41d4-a716-446655440000"}
+```
+
 #### `GET /lectures` — Список лекций
+
+| Параметр | Тип | Описание |
+|----------|-----|----------|
+| `student_group` | string, optional | Фильтр по студенческой группе |
+| `limit` | int, default=100 | Максимум записей |
 
 ```bash
 # Все лекции
@@ -192,79 +269,145 @@ curl http://localhost:8000/lectures
 curl "http://localhost:8000/lectures?student_group=CS-101&limit=10"
 ```
 
+Ответ (`array[LectureInfo]`):
+
+```json
+[
+  {
+    "id": "550e8400-...",
+    "record_id": "rec-001",
+    "student_groups": ["CS-101", "CS-102"],
+    "lecture_date": "2025-01-15"
+  }
+]
+```
+
 #### `GET /lectures/{id}` — Получить лекцию
 
 ```bash
-curl http://localhost:8000/lectures/uuid-here
+curl http://localhost:8000/lectures/550e8400-...
+```
+
+Ответ (`LectureDetail`):
+
+```json
+{
+  "id": "550e8400-...",
+  "record_id": "rec-001",
+  "student_groups": ["CS-101", "CS-102"],
+  "lecture_date": "2025-01-15",
+  "content": "Полный текст лекции..."
+}
 ```
 
 #### `DELETE /lectures/{id}` — Удалить лекцию
 
-```bash
-curl -X DELETE http://localhost:8000/lectures/uuid-here
-```
-
-### RAG — Запросы
-
-#### `POST /query` — Вопрос по лекциям
-
-Поддерживает фильтрацию по студенческой группе — ответ будет сгенерирован только на основе лекций указанной группы.
+Удаляет лекцию и все её чанки из PostgreSQL и Milvus.
 
 ```bash
-# Вопрос по всем лекциям
-curl -X POST http://localhost:8000/query \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Что такое нейронная сеть?"}'
-
-# Вопрос с фильтрацией по группе
-curl -X POST http://localhost:8000/query \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Что такое нейронная сеть?", "student_group": "CS-101"}'
+curl -X DELETE http://localhost:8000/lectures/550e8400-...
 ```
 
 Ответ:
 
 ```json
+{"deleted": true}
+```
+
+### RAG — Запросы
+
+#### `POST /query` — Вопрос по лекциям (Agentic RAG)
+
+Agentic RAG: переформулирует вопрос → ищет релевантные чанки в Milvus → генерирует ответ через LLM на основе найденного контекста.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `question` | string, **required** | Вопрос по лекциям |
+| `student_group` | string, optional | Фильтр — ответ только на основе лекций этой группы |
+
+```bash
+curl -X POST http://localhost:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Что такое нейронная сеть?", "student_group": "CS-101"}'
+```
+
+Ответ (`QueryResponse`):
+
+```jsonc
 {
-  "answer": "Нейронная сеть — это...",
+  // Сгенерированный ответ на основе найденных фрагментов лекций (string)
+  "answer": "Нейронная сеть — это математическая модель...",
+
+  // Метаданные чанков, использованных для генерации ответа (array[object])
   "sources": [
-    {"lecture_id": "...", "student_groups": ["CS-101"], "lecture_date": "2025-01-15"}
+    {
+      "lecture_id": "550e8400-...",
+      "student_groups": ["CS-101"],
+      "lecture_date": "2025-01-15"
+    }
   ],
-  "rewritten_question": "определение нейронной сети архитектура"
+
+  // Переформулированный запрос, использованный для поиска (string)
+  "rewritten_question": "определение нейронной сети архитектура принцип работы"
 }
 ```
 
-#### `POST /search` — Similarity search
+#### `POST /search` — Семантический поиск
+
+Поиск по similarity без генерации ответа. Возвращает топ-K релевантных чанков.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `query` | string, **required** | Поисковый запрос |
+| `student_group` | string, optional | Фильтр по студенческой группе |
+| `k` | int, default=5 (1–50) | Количество результатов |
 
 ```bash
 curl -X POST http://localhost:8000/search \
   -H "Content-Type: application/json" \
-  -d '{"query": "градиентный спуск", "k": 5}'
+  -d '{"query": "градиентный спуск", "student_group": "CS-101", "k": 5}'
 ```
 
-#### `POST /search/group` — Поиск по группе
+Ответ (`array[SearchResult]`):
 
-```bash
-curl -X POST http://localhost:8000/search/group \
-  -H "Content-Type: application/json" \
-  -d '{"query": "...", "student_group": "CS-101", "k": 5}'
+```json
+[
+  {
+    "content": "Градиентный спуск — это итеративный алгоритм оптимизации...",
+    "metadata": {
+      "lecture_id": "550e8400-...",
+      "student_groups": ["CS-101"],
+      "lecture_date": "2025-01-15"
+    }
+  }
+]
 ```
 
-#### `POST /search/dates` — Поиск по датам
+#### `POST /search/dates` — Поиск по диапазону дат
+
+Семантический поиск только среди лекций за указанный период.
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `query` | string, **required** | Поисковый запрос |
+| `start_date` | string, **required** | Начало периода (YYYY-MM-DD) |
+| `end_date` | string, **required** | Конец периода (YYYY-MM-DD) |
+| `student_group` | string, optional | Фильтр по студенческой группе |
+| `k` | int, default=5 (1–50) | Количество результатов |
 
 ```bash
 curl -X POST http://localhost:8000/search/dates \
   -H "Content-Type: application/json" \
-  -d '{"query": "...", "start_date": "2025-01-01", "end_date": "2025-06-30", "k": 5}'
+  -d '{
+    "query": "обратное распространение ошибки",
+    "start_date": "2025-01-01",
+    "end_date": "2025-06-30",
+    "student_group": "CS-101",
+    "k": 5
+  }'
 ```
 
-#### `POST /search/dates/group` — Поиск по датам и группе
-
-```bash
-curl -X POST http://localhost:8000/search/dates/group \
-  -H "Content-Type: application/json" \
-  -d '{"query": "...", "start_date": "2025-01-01", "end_date": "2025-06-30", "student_group": "CS-101", "k": 5}'
-```
+Ответ: такой же формат как у `POST /search` (`array[SearchResult]`).
 
 ## Стек
 
@@ -296,25 +439,17 @@ curl -X POST http://localhost:8000/search/dates/group \
 
 ```python
 from src.rec_analyzer import LectureAnalyzer
-from src.rag import LectureRAG
-from datetime import date
 
-# Инициализация
+# Инициализация (RAG включён по умолчанию)
 analyzer = LectureAnalyzer()
-rag = LectureRAG()
 
-# Анализ лекции
+# Анализ лекции (автоматически сохраняется в RAG)
 result = analyzer.process("lecture.mp3", "rec-001", ["CS-101"])
 
-# Добавление в RAG
-lecture_id = rag.add_lecture(
-    lecture_text=result["lecture_text"],
-    student_groups=["CS-101"],
-    lecture_date=date.today(),
-    record_id="rec-001",
-)
+# Анализ без RAG
+result = analyzer.process("lecture.mp3", "rec-002", ["CS-101"], use_rag=False)
 
 # Запрос к RAG
-answer = rag.query("Что такое нейронная сеть?")
+answer = analyzer.rag.query("Что такое нейронная сеть?")
 print(answer["answer"])
 ```

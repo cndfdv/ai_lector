@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from src.rag import LectureRAG
 from src.rec_analyzer import LectureAnalyzer
 
 # =============================================================================
@@ -37,14 +36,7 @@ class SearchRequest(BaseModel):
     """Запрос на поиск по similarity."""
 
     query: str = Field(..., description="Поисковый запрос")
-    k: int = Field(5, ge=1, le=50, description="Количество результатов")
-
-
-class GroupSearchRequest(BaseModel):
-    """Запрос на поиск по группе."""
-
-    query: str = Field(..., description="Поисковый запрос")
-    student_group: str = Field(..., description="Идентификатор студенческой группы")
+    student_group: Optional[str] = Field(None, description="Фильтр по студенческой группе")
     k: int = Field(5, ge=1, le=50, description="Количество результатов")
 
 
@@ -54,16 +46,7 @@ class DateSearchRequest(BaseModel):
     query: str = Field(..., description="Поисковый запрос")
     start_date: str = Field(..., description="Начальная дата (YYYY-MM-DD)")
     end_date: str = Field(..., description="Конечная дата (YYYY-MM-DD)")
-    k: int = Field(5, ge=1, le=50, description="Количество результатов")
-
-
-class DateGroupSearchRequest(BaseModel):
-    """Запрос на поиск по диапазону дат и группе."""
-
-    query: str = Field(..., description="Поисковый запрос")
-    start_date: str = Field(..., description="Начальная дата (YYYY-MM-DD)")
-    end_date: str = Field(..., description="Конечная дата (YYYY-MM-DD)")
-    student_group: str = Field(..., description="Идентификатор студенческой группы")
+    student_group: Optional[str] = Field(None, description="Фильтр по студенческой группе")
     k: int = Field(5, ge=1, le=50, description="Количество результатов")
 
 
@@ -162,7 +145,6 @@ async def lifespan(app: FastAPI):
     """Загрузка ML моделей при старте, очистка при остановке."""
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     app.state.analyzer = LectureAnalyzer()
-    app.state.rag = LectureRAG()
     yield
 
 
@@ -218,7 +200,7 @@ async def analyze_lecture(
     )
 
     try:
-        result = app.state.analyzer.process(tmp_path, record_id, groups, date, rag=app.state.rag)
+        result = app.state.analyzer.process(tmp_path, record_id, groups, date)
     except FileNotFoundError:
         raise HTTPException(404, "Аудиофайл не найден")
     except Exception as e:
@@ -243,7 +225,7 @@ async def analyze_lecture(
     tags=["Лекции"],
 )
 async def add_lecture(req: AddLectureRequest):
-    lecture_id = app.state.rag.add_lecture(
+    lecture_id = app.state.analyzer.rag.add_lecture(
         lecture_text=req.lecture_text,
         student_groups=req.student_groups,
         lecture_date=req.lecture_date,
@@ -263,7 +245,7 @@ async def list_lectures(
     student_group: Optional[str] = None,
     limit: int = 100,
 ):
-    lectures = app.state.rag.list_lectures(
+    lectures = app.state.analyzer.rag.list_lectures(
         student_group=student_group, limit=limit
     )
     return [
@@ -285,7 +267,7 @@ async def list_lectures(
     tags=["Лекции"],
 )
 async def get_lecture(lecture_id: str):
-    lecture = app.state.rag.get_lecture(lecture_id)
+    lecture = app.state.analyzer.rag.get_lecture(lecture_id)
     if not lecture:
         raise HTTPException(404, "Лекция не найдена")
     return LectureDetail(
@@ -305,7 +287,7 @@ async def get_lecture(lecture_id: str):
     tags=["Лекции"],
 )
 async def delete_lecture(lecture_id: str):
-    deleted = app.state.rag.delete_lecture(lecture_id)
+    deleted = app.state.analyzer.rag.delete_lecture(lecture_id)
     if not deleted:
         raise HTTPException(404, "Лекция не найдена")
     return DeleteResponse(deleted=True)
@@ -327,7 +309,7 @@ async def delete_lecture(lecture_id: str):
     tags=["RAG"],
 )
 async def query_rag(req: QueryRequest):
-    result = app.state.rag.query(req.question, student_group=req.student_group)
+    result = app.state.analyzer.rag.query(req.question, student_group=req.student_group)
     return QueryResponse(**result)
 
 
@@ -335,26 +317,15 @@ async def query_rag(req: QueryRequest):
     "/search",
     response_model=List[SearchResult],
     summary="Поиск по similarity",
-    description="Семантический поиск по всем лекциям без генерации ответа.",
+    description="Семантический поиск по лекциям без генерации ответа. Опционально — фильтрация по группе.",
     tags=["RAG"],
 )
 async def search(req: SearchRequest):
-    docs = app.state.rag.simple_search(req.query, k=req.k)
-    return [
-        SearchResult(content=doc.page_content, metadata=doc.metadata)
-        for doc in docs
-    ]
-
-
-@app.post(
-    "/search/group",
-    response_model=List[SearchResult],
-    summary="Поиск по группе",
-    description="Семантический поиск в лекциях конкретной студенческой группы.",
-    tags=["RAG"],
-)
-async def search_by_group(req: GroupSearchRequest):
-    docs = app.state.rag.search_by_group(req.query, req.student_group, k=req.k)
+    rag = app.state.analyzer.rag
+    if req.student_group:
+        docs = rag.search_by_group(req.query, req.student_group, k=req.k)
+    else:
+        docs = rag.simple_search(req.query, k=req.k)
     return [
         SearchResult(content=doc.page_content, metadata=doc.metadata)
         for doc in docs
@@ -365,30 +336,19 @@ async def search_by_group(req: GroupSearchRequest):
     "/search/dates",
     response_model=List[SearchResult],
     summary="Поиск по диапазону дат",
-    description="Семантический поиск в лекциях за указанный период.",
+    description="Семантический поиск в лекциях за указанный период. Опционально — фильтрация по группе.",
     tags=["RAG"],
 )
 async def search_by_dates(req: DateSearchRequest):
-    docs = app.state.rag.search_by_date_range(
-        req.query, req.start_date, req.end_date, k=req.k
-    )
-    return [
-        SearchResult(content=doc.page_content, metadata=doc.metadata)
-        for doc in docs
-    ]
-
-
-@app.post(
-    "/search/dates/group",
-    response_model=List[SearchResult],
-    summary="Поиск по датам и группе",
-    description="Семантический поиск в лекциях конкретной группы за указанный период.",
-    tags=["RAG"],
-)
-async def search_by_dates_and_group(req: DateGroupSearchRequest):
-    docs = app.state.rag.search_by_date_range_and_group(
-        req.query, req.start_date, req.end_date, req.student_group, k=req.k
-    )
+    rag = app.state.analyzer.rag
+    if req.student_group:
+        docs = rag.search_by_date_range_and_group(
+            req.query, req.start_date, req.end_date, req.student_group, k=req.k
+        )
+    else:
+        docs = rag.search_by_date_range(
+            req.query, req.start_date, req.end_date, k=req.k
+        )
     return [
         SearchResult(content=doc.page_content, metadata=doc.metadata)
         for doc in docs

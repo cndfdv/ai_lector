@@ -1,6 +1,7 @@
 """Lecture RAG module for storing and querying lecture content."""
 
 import json
+import os
 import uuid
 from datetime import date
 from typing import List, Optional
@@ -33,6 +34,7 @@ class LectureRAG:
         # Initialize embeddings
         self.embeddings = HuggingFaceEmbeddings(
             model_name=self.config.embedding_model,
+            model_kwargs={"token": os.getenv("HUGGINGFACEHUB_API_TOKEN")},
         )
 
         # Initialize vector store

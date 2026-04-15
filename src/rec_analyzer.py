@@ -36,6 +36,8 @@ from src.prompts import (
 )
 
 STOPWORDS_PATH = "src/stopwords.txt"
+SILENCE_SPEAKER_ID = 3
+
 logger = logging.getLogger(__name__)
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
@@ -195,12 +197,12 @@ def fill_silence_intervals(
         data: List of [speaker_id, start, end] tuples.
 
     Returns:
-        Data with silence intervals (speaker_id=3) filled in.
+        Data with silence intervals (speaker_id=SILENCE_SPEAKER_ID) filled in.
     """
     filled_data = []
 
     if data[0][1] > 0:
-        filled_data.append([3, 0, data[0][1]])
+        filled_data.append([SILENCE_SPEAKER_ID, 0, data[0][1]])
     for i, entry in enumerate(data):
         speaker, start, end = entry
         filled_data.append(entry)
@@ -208,7 +210,7 @@ def fill_silence_intervals(
         if i < len(data) - 1:
             next_start = data[i + 1][1]
             if end < next_start:
-                filled_data.append([3, end, next_start])
+                filled_data.append([SILENCE_SPEAKER_ID, end, next_start])
     return filled_data
 
 
@@ -335,16 +337,16 @@ def transcribe(
             fragment_np = fragment_resampled.numpy()
 
         text = ""
-        if speaker != 3:
+        if speaker != SILENCE_SPEAKER_ID:
             text = speech_pipe(
                 inputs=fragment_np,
                 generate_kwargs={"language": "russian"},
                 return_timestamps=True,
             )["text"]
 
-        if speaker == 3 or text.strip() == "" or text == " Продолжение следует...":
+        if speaker == SILENCE_SPEAKER_ID or text.strip() == "" or text == " Продолжение следует...":
             text = ""
-            speaker = 3
+            speaker = SILENCE_SPEAKER_ID
 
         chunks.append([speaker, text.strip(), (start, end)])
 
@@ -375,7 +377,7 @@ def analyze_words(
     word_w_stopw = {1: [], 2: []}
 
     for speaker, text, _ in chunks:
-        if speaker != 3:
+        if speaker != SILENCE_SPEAKER_ID:
             word_no_stopw[speaker].extend(
                 [
                     word
@@ -417,7 +419,7 @@ def calculate_speech_speed(chunks: List[List]) -> Tuple[List[float], Dict[int, f
     words_per_minute = {}
 
     for speaker, text, timestamp in chunks:
-        if speaker != 3:
+        if speaker != SILENCE_SPEAKER_ID:
             _, end = timestamp
             end = end // 60
             if end not in words_per_minute:
@@ -451,14 +453,14 @@ def format_chunks(chunks: List[List]) -> List[List]:
     _transcripted_chunks = deepcopy(chunks)
     del_ind = []
 
-    silence_intervals = [i[2][1] - i[2][0] for i in chunks if i[0] == 3]
+    silence_intervals = [i[2][1] - i[2][0] for i in chunks if i[0] == SILENCE_SPEAKER_ID]
     if not silence_intervals:
         mean = 0
     else:
         mean = sum(silence_intervals) / len(silence_intervals)
 
     for i in range(len(_transcripted_chunks)):
-        if _transcripted_chunks[i][0] == 3:
+        if _transcripted_chunks[i][0] == SILENCE_SPEAKER_ID:
             if (
                 float(_transcripted_chunks[i][2][1])
                 - float(_transcripted_chunks[i][2][0])
@@ -601,9 +603,11 @@ def generate_podcast(
     audio_segment.export(output_file_path + ".mp3", format="mp3", bitrate="192k")
 
     # Cleanup
-    os.remove(output_file_path + ".wav")
-    os.remove(wav_path)
-    os.remove(clean_fragment_path)
+    for path in [output_file_path + ".wav", wav_path, clean_fragment_path]:
+        try:
+            os.remove(path)
+        except OSError as e:
+            logger.warning("Не удалось удалить временный файл %s: %s", path, e)
 
     clear_gpu_cache()
 
@@ -632,10 +636,6 @@ class LectureAnalyzer:
         """Initialize the analyzer service.
 
         Loads all ML models once. This should be called once at service startup.
-
-        Args:
-            pyannote_api_key: API key for pyannote speaker diarization.
-            llm_base_url: Base URL for the LLM API endpoint.
         """
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
@@ -786,6 +786,7 @@ class LectureAnalyzer:
                 for q in questions
             ]
         except Exception:
+            logger.exception("Не удалось сгенерировать вопросы")
             return []
 
     def _generate_mindmap(self, lecture_text: str, max_retries: int = 10) -> dict:
@@ -989,29 +990,6 @@ class LectureAnalyzer:
             "questions": llm_result["questions"],
             "podcast": podcast_path,
         }
-
-    def get_results(
-        self,
-        recording_path: str,
-        record_id: str,
-        group: str,
-        lection_date: datetime.date = None,
-    ) -> str:
-        """Process recording and return results as JSON string.
-
-        This method provides backward compatibility with the old API.
-
-        Args:
-            recording_path: Path to audio file.
-            record_id: Unique identifier for this recording.
-            group: Student group identifier.
-            lection_date: Date of the lecture.
-
-        Returns:
-            JSON string with all analysis results.
-        """
-        result = self.process(recording_path, record_id, [group], lection_date)
-        return json.dumps(result, default=str)
 
     def _llm_analyze(self, lecture_text: str) -> dict:
         """Analyze lecture using LLM with structured outputs.

@@ -12,3 +12,4 @@ TODO.md
 .env
 test_md_texts.md
 test_stability.ipynb
+*.json

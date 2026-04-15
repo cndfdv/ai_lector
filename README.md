@@ -148,7 +148,7 @@ uvicorn app:app --host 0.0.0.0 --port 8000
 | `file` | file, **required** | Аудиофайл лекции (`.mp3` или `.wav`) |
 | `record_id` | string, **required** | Уникальный ID записи |
 | `groups` | string[], **required** | Список студенческих групп (можно указать несколько раз) |
-| `lecture_date` | string, optional | Дата лекции (`YYYY-MM-DD`), по умолчанию сегодня |
+| `lecture_date` | string, optional | Дата лекции (`DD-MM-YYYY`), по умолчанию сегодня |
 
 ```bash
 curl -X POST http://localhost:8000/analyze \
@@ -156,7 +156,7 @@ curl -X POST http://localhost:8000/analyze \
   -F "record_id=rec-001" \
   -F "groups=CS-101" \
   -F "groups=CS-102" \
-  -F "lecture_date=2025-01-15"
+  -F "lecture_date=15-01-2025"
 ```
 
 Ответ (`AnalysisResponse`):
@@ -232,6 +232,62 @@ curl -X POST http://localhost:8000/analyze \
   // Путь к сгенерированному подкасту, null если не удалось (string | null)
   "podcast": "a1b2c3d4.mp3"
 }
+```
+
+#### `POST /analyze/async` — Асинхронный анализ (рекомендуется для фронта/мобайла)
+
+Тот же пайплайн, но **не блокирует клиента** — сразу возвращает `task_id` (HTTP 202). Результат получать через `GET /tasks/{task_id}`.
+
+Формат запроса: такой же как у `POST /analyze` (`multipart/form-data`).
+
+```bash
+curl -X POST http://localhost:8000/analyze/async \
+  -F "file=@lecture.mp3" \
+  -F "record_id=rec-001" \
+  -F "groups=CS-101" \
+  -F "groups=CS-102" \
+  -F "lecture_date=15-01-2025"
+```
+
+Ответ (HTTP 202):
+
+```json
+{"task_id": "550e8400-e29b-41d4-a716-446655440000"}
+```
+
+#### `GET /tasks/{task_id}` — Статус задачи
+
+Поллинг статуса асинхронного анализа. Рекомендуемый интервал — 5-10 секунд.
+
+```bash
+curl http://localhost:8000/tasks/550e8400-e29b-41d4-a716-446655440000
+```
+
+Ответ (`TaskInfo`):
+
+```jsonc
+{
+  "task_id": "550e8400-e29b-41d4-a716-446655440000",
+
+  // "pending" — в очереди, "processing" — обрабатывается,
+  // "completed" — готово, "failed" — ошибка
+  "status": "completed",
+
+  // Результат анализа, появляется когда status = "completed"
+  // Формат такой же как у POST /analyze (AnalysisResponse)
+  "result": { ... },
+
+  // Сообщение об ошибке, появляется когда status = "failed"
+  "error": null
+}
+```
+
+| status | result | error | Что делать |
+|--------|--------|-------|------------|
+| `pending` | null | null | Ждать, повторить запрос через 5-10 сек |
+| `processing` | null | null | Ждать, повторить запрос через 5-10 сек |
+| `completed` | `AnalysisResponse` | null | Готово, забрать результат из `result` |
+| `failed` | null | string | Ошибка, показать `error` пользователю |
 
 ### RAG — Управление лекциями
 
@@ -243,7 +299,7 @@ curl -X POST http://localhost:8000/lectures \
   -d '{
     "lecture_text": "Текст лекции...",
     "student_groups": ["CS-101", "CS-102"],
-    "lecture_date": "2025-01-15",
+    "lecture_date": "15-01-2025",
     "record_id": "rec-001"
   }'
 ```
@@ -259,7 +315,7 @@ curl -X POST http://localhost:8000/lectures \
 | Параметр | Тип | Описание |
 |----------|-----|----------|
 | `student_group` | string, optional | Фильтр по студенческой группе |
-| `limit` | int, default=100 | Максимум записей |
+| `limit` | int, default=100 (1–1000) | Максимум записей |
 
 ```bash
 # Все лекции
@@ -277,7 +333,7 @@ curl "http://localhost:8000/lectures?student_group=CS-101&limit=10"
     "id": "550e8400-...",
     "record_id": "rec-001",
     "student_groups": ["CS-101", "CS-102"],
-    "lecture_date": "2025-01-15"
+    "lecture_date": "15-01-2025"
   }
 ]
 ```
@@ -295,7 +351,7 @@ curl http://localhost:8000/lectures/550e8400-...
   "id": "550e8400-...",
   "record_id": "rec-001",
   "student_groups": ["CS-101", "CS-102"],
-  "lecture_date": "2025-01-15",
+  "lecture_date": "15-01-2025",
   "content": "Полный текст лекции..."
 }
 ```
@@ -343,7 +399,7 @@ curl -X POST http://localhost:8000/query \
     {
       "lecture_id": "550e8400-...",
       "student_groups": ["CS-101"],
-      "lecture_date": "2025-01-15"
+      "lecture_date": "15-01-2025"
     }
   ],
 
@@ -377,7 +433,7 @@ curl -X POST http://localhost:8000/search \
     "metadata": {
       "lecture_id": "550e8400-...",
       "student_groups": ["CS-101"],
-      "lecture_date": "2025-01-15"
+      "lecture_date": "15-01-2025"
     }
   }
 ]
@@ -390,8 +446,8 @@ curl -X POST http://localhost:8000/search \
 | Поле | Тип | Описание |
 |------|-----|----------|
 | `query` | string, **required** | Поисковый запрос |
-| `start_date` | string, **required** | Начало периода (YYYY-MM-DD) |
-| `end_date` | string, **required** | Конец периода (YYYY-MM-DD) |
+| `start_date` | string, **required** | Начало периода (DD-MM-YYYY) |
+| `end_date` | string, **required** | Конец периода (DD-MM-YYYY) |
 | `student_group` | string, optional | Фильтр по студенческой группе |
 | `k` | int, default=5 (1–50) | Количество результатов |
 
@@ -400,8 +456,8 @@ curl -X POST http://localhost:8000/search/dates \
   -H "Content-Type: application/json" \
   -d '{
     "query": "обратное распространение ошибки",
-    "start_date": "2025-01-01",
-    "end_date": "2025-06-30",
+    "start_date": "01-01-2025",
+    "end_date": "30-06-2025",
     "student_group": "CS-101",
     "k": 5
   }'
@@ -434,6 +490,7 @@ curl -X POST http://localhost:8000/search/dates \
 | `milvus` | 19530 | Milvus (векторный поиск) |
 | `etcd` | 2379 | etcd (для Milvus) |
 | `minio` | 9001 | MinIO (хранилище для Milvus) |
+| `attu` | 3000 | Attu (UI для управления Milvus) |
 
 ## Использование из Python
 

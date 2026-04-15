@@ -1,10 +1,13 @@
 """Lecture RAG module for storing and querying lecture content."""
 
 import json
+import logging
 import os
 import uuid
 from datetime import date
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 from chonkie import Pipeline
 from chonkie.genie import OpenAIGenie
@@ -206,8 +209,8 @@ class LectureRAG:
 
         Args:
             query: Search query.
-            start_date: Start date (YYYY-MM-DD).
-            end_date: End date (YYYY-MM-DD).
+            start_date: Start date (DD-MM-YYYY).
+            end_date: End date (DD-MM-YYYY).
             k: Number of results.
 
         Returns:
@@ -304,7 +307,11 @@ class LectureRAG:
                 try:
                     self.vector_store.delete(chunk_ids)
                 except Exception:
-                    pass  # Milvus may not support delete on some configs
+                    logger.warning(
+                        "Не удалось удалить чанки из Milvus для лекции %s",
+                        lecture_id,
+                        exc_info=True,
+                    )
 
             # Delete from PostgreSQL (cascades to chunks)
             session.delete(lecture)

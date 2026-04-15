@@ -21,6 +21,8 @@ def _validate_group(student_group: str) -> str:
 
 def _validate_date(value: str, field_name: str) -> str:
     """Validate date string format (DD-MM-YYYY) and convert to YYYY-MM-DD for Milvus."""
+    if len(value) != 10:
+        raise ValueError(f"Неверный формат даты {field_name}: {value!r}, ожидается DD-MM-YYYY")
     try:
         parsed = date(int(value[6:10]), int(value[3:5]), int(value[0:2]))
     except (ValueError, IndexError):

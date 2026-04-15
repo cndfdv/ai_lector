@@ -967,6 +967,14 @@ class LectureAnalyzer:
 
         clear_gpu_cache()
 
+        # Cleanup intermediate audio files (keep podcast)
+        for path in [audio.wav_path, clean_fragment_path]:
+            if path and path != recording_path:
+                try:
+                    os.remove(path)
+                except OSError as e:
+                    logger.warning("Не удалось удалить промежуточный файл %s: %s", path, e)
+
         if use_rag:
             try:
                 self.rag.add_lecture(

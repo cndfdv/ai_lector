@@ -34,6 +34,8 @@ class AddLectureRequest(BaseModel):
     @field_validator("lecture_date")
     @classmethod
     def validate_date_format(cls, v: str) -> str:
+        if len(v) != 10:
+            raise ValueError(f"Неверный формат даты: {v!r}, ожидается DD-MM-YYYY")
         try:
             datetime.date(int(v[6:10]), int(v[3:5]), int(v[0:2]))
         except (ValueError, IndexError):
@@ -68,6 +70,8 @@ class DateSearchRequest(BaseModel):
     @field_validator("start_date", "end_date")
     @classmethod
     def validate_date_format(cls, v: str) -> str:
+        if len(v) != 10:
+            raise ValueError(f"Неверный формат даты: {v!r}, ожидается DD-MM-YYYY")
         try:
             datetime.date(int(v[6:10]), int(v[3:5]), int(v[0:2]))
         except (ValueError, IndexError):
@@ -187,6 +191,22 @@ class TaskInfo(BaseModel):
 
 # In-memory task storage
 _tasks: Dict[str, dict] = {}
+_TASK_TTL_SECONDS = 3600  # 1 час
+
+
+async def _cleanup_tasks():
+    """Periodically remove tasks older than TTL."""
+    while True:
+        await asyncio.sleep(300)  # проверка каждые 5 минут
+        now = datetime.datetime.utcnow()
+        expired = [
+            tid for tid, t in _tasks.items()
+            if (now - t["created_at"]).total_seconds() > _TASK_TTL_SECONDS
+        ]
+        for tid in expired:
+            del _tasks[tid]
+        if expired:
+            logger.info("Очищено %d устаревших задач", len(expired))
 
 
 # =============================================================================
@@ -201,7 +221,9 @@ async def lifespan(app: FastAPI):
     """Загрузка ML моделей при старте, очистка при остановке."""
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     app.state.analyzer = LectureAnalyzer()
+    cleanup = asyncio.create_task(_cleanup_tasks())
     yield
+    cleanup.cancel()
 
 
 app = FastAPI(
@@ -218,6 +240,8 @@ app = FastAPI(
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Catch unhandled exceptions — log details, return generic message."""
+    if isinstance(exc, HTTPException):
+        raise exc
     logger.exception("Необработанная ошибка: %s %s", request.method, request.url.path)
     return JSONResponse(status_code=500, content={"detail": "Внутренняя ошибка сервера"})
 
@@ -350,7 +374,12 @@ async def analyze_lecture_async(
         date = datetime.date.today()
 
     task_id = str(uuid.uuid4())
-    _tasks[task_id] = {"status": TaskStatus.pending, "result": None, "error": None}
+    _tasks[task_id] = {
+        "status": TaskStatus.pending,
+        "result": None,
+        "error": None,
+        "created_at": datetime.datetime.utcnow(),
+    }
 
     asyncio.create_task(_run_analysis(task_id, tmp_path, record_id, groups, date))
 

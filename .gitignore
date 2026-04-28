@@ -11,5 +11,5 @@ TODO.md
 .vscode/
 .env
 test_md_texts.md
-test_stability.ipynb
+*.ipynb
 *.json

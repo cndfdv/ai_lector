@@ -10,7 +10,10 @@ ai_lector/
 ├── Dockerfile                      # Образ сервиса (PyTorch + CUDA)
 ├── docker-compose.yml              # PostgreSQL, Milvus, App
 ├── requirements.txt                # Зависимости Python
-├── .env                            # Конфигурация (порты, ключи, модели)
+├── .env.example                    # Шаблон конфигурации (порты, ключи, модели)
+│
+├── docs/
+│   └── API.md                      # Полная документация HTTP API
 │
 ├── src/
 │   ├── rec_analyzer.py             # LectureAnalyzer — основной класс анализа
@@ -39,10 +42,7 @@ ai_lector/
 ├── init/
 │   └── 01_init.sql                 # Инициализация БД (таблицы, индексы)
 │
-├── data/txt_data/                  # Текстовые данные лекций
-├── test_results.ipynb              # Тесты полного пайплайна на реальных аудио
-├── mini_tests.ipynb                # Пошаговые тесты отдельных функций
-└── test_rag.ipynb                  # Тесты RAG
+└── data/txt_data/                  # Текстовые данные лекций
 ```
 
 ## Архитектура
@@ -83,32 +83,19 @@ ai_lector/
 
 ### 1. Настройка окружения
 
-Скопировать `.env` и заполнить:
+Скопировать шаблон и заполнить значения:
 
-```env
-# Database
-POSTGRES_USER=user
-POSTGRES_PASSWORD=password
-POSTGRES_DB=lectures
-POSTGRES_PORT=5433
-POSTGRES_HOST=localhost
-
-# Milvus
-MILVUS_HOST=localhost
-MILVUS_PORT=19530
-MILVUS_COLLECTION=lectures
-
-# LLM
-LLM_URL=http://10.162.1.92:1234/v1
-LLM_NAME=gpt-oss-lab
-LLM_API_KEY=not-needed
-
-# HuggingFace (для pyannote)
-HUGGINGFACEHUB_API_TOKEN=hf_...
-
-# Embeddings
-EMBEDDING_MODEL=Qwen/Qwen3-Embedding-0.6B
+```bash
+cp .env.example .env
 ```
+
+Обязательно укажи:
+
+- `POSTGRES_PASSWORD` — пароль БД
+- `LLM_URL`, `LLM_NAME` — адрес OpenAI-совместимого LLM-сервера
+- `HUGGINGFACEHUB_API_TOKEN` — токен HuggingFace (нужен для pyannote)
+
+Полный список переменных — в [.env.example](.env.example).
 
 ### 2. Запуск через Docker
 
@@ -135,11 +122,40 @@ uvicorn app:app --host 0.0.0.0 --port 8000
 
 ## API
 
-### Анализ лекций
+Полная документация по эндпоинтам с форматами запросов, ответов и кодами ошибок — в [docs/API.md](docs/API.md).
 
-#### `POST /analyze` — Полный анализ аудиозаписи
+Также доступна интерактивная документация после запуска сервиса:
 
-Принимает аудиофайл (mp3/wav), выполняет полный пайплайн: диаризация → транскрипция → LLM-анализ → генерация подкаста. Автоматически сохраняет лекцию в RAG.
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+- OpenAPI JSON: `http://localhost:8000/openapi.json`
+
+### Эндпоинты
+
+**Анализ лекций:**
+
+| Метод | Путь | Назначение |
+|-------|------|------------|
+| `POST` | `/analyze` | Полный синхронный анализ аудиозаписи |
+| `POST` | `/analyze/async` | Асинхронный анализ (возвращает `task_id`) |
+| `GET` | `/tasks/{task_id}` | Статус и результат асинхронной задачи |
+
+**RAG — управление лекциями:**
+
+| Метод | Путь | Назначение |
+|-------|------|------------|
+| `POST` | `/lectures` | Добавить лекцию в RAG |
+| `GET` | `/lectures` | Список лекций (фильтр по группе) |
+| `GET` | `/lectures/{id}` | Получить лекцию по ID |
+| `DELETE` | `/lectures/{id}` | Удалить лекцию |
+
+**RAG — запросы:**
+
+| Метод | Путь | Назначение |
+|-------|------|------------|
+| `POST` | `/query` | Agentic RAG: вопрос → ответ с источниками |
+| `POST` | `/search` | Семантический поиск по чанкам |
+| `POST` | `/search/dates` | Поиск с фильтром по диапазону дат |
 
 Формат запроса: `multipart/form-data`.
 
@@ -462,8 +478,6 @@ curl -X POST http://localhost:8000/search/dates \
     "k": 5
   }'
 ```
-
-Ответ: такой же формат как у `POST /search` (`array[SearchResult]`).
 
 ## Стек
 
